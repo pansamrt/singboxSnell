@@ -19,4 +19,5 @@ jobs:
         run: |
           grep -Fq 'sn sub' snell-v6-oneclick.sh
           grep -Fq 'sync-certs' snell-v6-subscribe.sh
-          grep -Fq 'GET' /dev/null || true
+      - name: Test live local TLS endpoint, token revocation and Snell port reflection
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
