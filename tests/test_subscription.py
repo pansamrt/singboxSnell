@@ -181,6 +181,44 @@ class SubscriptionTest(unittest.TestCase):
             result.stdout
         )
 
+    def test_setup_exit_cleanup_does_not_leak_into_parent_menu(self):
+        """Regression: leaving subscription menu after setup must not expand local tmpdir."""
+        helper = (Path(__file__).parents[1] /
+                  "snell-v6-subscribe.sh").read_text(encoding="utf-8")
+        self.assertEqual(helper.count("setup() (\n"), 1)
+        self.assertIn("  show_links\n)\ndisable() {", helper)
+        setup_body = helper.split("setup() (\n", 1)[1].split(
+            "\n)\ndisable() {", 1
+        )[0]
+        trap = next(line for line in setup_body.splitlines()
+                    if line.strip().startswith("trap ") and line.endswith(" EXIT"))
+        # Execute the exact installed trap expression in the intended
+        # function-subshell shape, twice, and assert no parent EXIT trap remains.
+        script = (
+            "set -Eeuo pipefail\n"
+            "setup_test() (\n"
+            " local tmpdir\n"
+            " tmpdir=$(mktemp -d /tmp/snell-sub-test.XXXXXXXX)\n"
+            + trap + "\n"
+            " printf 'TMP:%s\\n' \"$tmpdir\"\n"
+            ")\n"
+            "setup_test\n"
+            "setup_test\n"
+            "printf 'RETURNED_TO_MENU\\n'\n"
+        )
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            text=True, capture_output=True, timeout=10,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stderr, "")
+        self.assertIn("RETURNED_TO_MENU", proc.stdout)
+        paths = [line.split(":", 1)[1] for line in proc.stdout.splitlines()
+                 if line.startswith("TMP:")]
+        self.assertEqual(len(paths), 2)
+        for path in paths:
+            self.assertFalse(Path(path).exists(), path)
+
     def test_sub_shortcut_displays_links_and_preserves_menu(self):
         root = Path(__file__).parents[1]
         helper = (root / "snell-v6-subscribe.sh").read_text(encoding="utf-8")
