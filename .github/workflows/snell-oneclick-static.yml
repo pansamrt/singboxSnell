@@ -1,0 +1,23 @@
+name: Standalone Snell v6 script syntax and help
+on:
+  pull_request:
+  push:
+    branches: ["main", "feature/**"]
+permissions:
+  contents: read
+jobs:
+  snell-static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check bash syntax and owner guidance
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash -n snell-v6-oneclick.sh
+          bash snell-v6-oneclick.sh --help | grep -F 'Usage: sudo bash snell-v6-oneclick.sh'
+          test -s README.md
+          echo 'PASS: script syntax and help; no VPS changes or network access'
