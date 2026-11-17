@@ -75,20 +75,20 @@ UNIT=/etc/systemd/system/snell-v6.service
 BIN=/opt/snell-v6/snell-server
 
 info() { printf '[sn] %s\n' "$*"; }
-fail() { printf '[sn] ERROR: %s\n' "$*" >&2; exit 1; }
+fail() { printf '[sn] 错误： %s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<'EOF'
-Snell v6 standalone manager:
-  sn              Interactive menu
-  sn status       Show status and current TCP port
-  sn port         Change TCP port with interactive prompt and rollback
-  sn install      Install standalone Snell v6 (guided)
-  sn uninstall    Remove standalone Snell v6, keep sn command
-  sn sub          HTTPS subscription, domain/TLS and QR menu
-  sn sub setup    Setup HTTPS subscription (existing ECC certificate or ACME)
-  sn sub show     Show subscription URL and QR
-  sn sub update   Update local subscription helper from this project
-  sn --help       Display this help
+Snell v6 管理工具：
+  sn              打开交互式菜单
+  sn status       查看运行状态和 TCP 端口
+  sn port         修改 TCP 端口（失败自动回滚）
+  sn install      一键安装 Snell v6
+  sn uninstall    卸载 Snell v6（保留 sn 命令）
+  sn sub          HTTPS 订阅、域名证书与二维码管理
+  sn sub setup    配置 HTTPS 订阅（复用 ECC 证书或申请 ACME）
+  sn sub show     查看订阅地址和二维码
+  sn sub update   更新订阅管理组件
+  sn --help       显示帮助
 EOF
 }
 installation_state() {
@@ -99,16 +99,16 @@ installation_state() {
   case "$n" in 0) echo absent;; 3) echo present;; *) echo partial;; esac
 }
 precheck() {
-  [[ $EUID -eq 0 ]] || fail 'Run as root (sudo sn).'
+  [[ $EUID -eq 0 ]] || fail '请使用 root 权限运行（sudo sn）。'
   for path in "$CONF" "$UNIT" "$BIN"; do
-    [[ -f "$path" && ! -L "$path" ]] || fail "Standalone Snell file missing or symlink: $path"
-    [[ "$(stat -c %u -- "$path")" == 0 ]] || fail "Standalone Snell file must be root-owned: $path"
+    [[ -f "$path" && ! -L "$path" ]] || fail "独立 Snell 文件缺失或是软链接： $path"
+    [[ "$(stat -c %u -- "$path")" == 0 ]] || fail "独立 Snell 文件必须由 root 所有： $path"
   done
-  [[ -d /etc/snell-v6 && ! -L /etc/snell-v6 ]] || fail 'Snell config directory is unsafe.'
+  [[ -d /etc/snell-v6 && ! -L /etc/snell-v6 ]] || fail 'Snell 配置目录存在安全风险。'
   grep -Fxq 'ExecStart=/opt/snell-v6/snell-server -c /etc/snell-v6/snell-server.conf' "$UNIT" ||
-    fail 'Unexpected snell-v6 systemd unit. No changes made.'
+    fail 'snell-v6 服务文件不符合预期，未进行修改。'
   for prog in python3 systemctl flock; do
-    command -v "$prog" >/dev/null 2>&1 || fail "Required program missing: $prog"
+    command -v "$prog" >/dev/null 2>&1 || fail "缺少必要程序： $prog"
   done
 }
 current_port() {
@@ -122,45 +122,45 @@ for entry in cfg.get('snell-server', 'listen').split(','):
     entry = entry.strip()
     m = re.fullmatch(r'(0\.0\.0\.0|\[::\]|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-fA-F:]+\]):([0-9]{1,5})', entry)
     if not m:
-        raise SystemExit('Unsupported listen address: ' + entry)
+        raise SystemExit('不支持的监听地址： ' + entry)
     ports.add(int(m.group(2)))
 if len(ports) != 1:
-    raise SystemExit('Multiple distinct Snell listener ports; refusing automatic edit.')
+    raise SystemExit('检测到多个不同的监听端口，拒绝自动修改。')
 print(ports.pop())
 PY
 }
 show_status() {
   case "$(installation_state)" in
-    absent) info 'Snell not installed. Run sn install.'; return 0 ;;
-    partial) fail 'Partial Snell installation; inspect manually.' ;;
+    absent) info 'Snell 未安装，请运行 sn install。'; return 0 ;;
+    partial) fail 'Snell 安装不完整，请手动检查。' ;;
   esac
   precheck
   local old
   old=$(current_port)
-  info "Current Snell TCP port: $old"
-  info "snell-v6.service: $(systemctl is-active snell-v6.service 2>/dev/null || true)"
+  info "当前 Snell TCP 端口： $old"
+  info "snell-v6.service 状态：$(systemctl is-active snell-v6.service 2>/dev/null || true)"
 }
 change_port() (
   set -Eeuo pipefail
   precheck
-  [[ -t 0 ]] || fail 'Changing port requires an interactive terminal.'
+  [[ -t 0 ]] || fail '修改端口需要交互式终端。'
   systemctl is-active --quiet snell-v6.service || fail 'Snell service not active. Diagnose before modifying.'
   local old new confirm backup="" edited=0 committed=0
   old=$(current_port)
-  printf '\nSnell v6 current TCP port: %s\n' "$old"
-  read -r -p 'New TCP port (1024-65535): ' new
-  [[ "$new" =~ ^[0-9]{1,5}$ ]] || fail 'Enter a decimal port in range 1024-65535.'
+  printf '\nSnell v6 当前 TCP 端口： %s\n' "$old"
+  read -r -p '请输入新的 TCP 端口（1024-65535）： ' new
+  [[ "$new" =~ ^[0-9]{1,5}$ ]] || fail '请输入 1024-65535 之间的端口号。'
   new=$((10#$new))
-  ((new >= 1024 && new <= 65535)) || fail 'Port must be 1024-65535.'
-  if ((new == old)); then info 'Port unchanged.'; exit 0; fi
-  printf 'Snell port: %s -> %s. PSK will stay unchanged.\n' "$old" "$new"
-  printf 'Provider firewall must allow new TCP %s; iPhone profile must be updated.\n' "$new"
-  read -r -p 'Type YES to confirm: ' confirm
-  [[ "$confirm" == YES ]] || { info 'Cancelled; no changes.'; exit 0; }
+  ((new >= 1024 && new <= 65535)) || fail '端口必须在 1024-65535 范围内。'
+  if ((new == old)); then info '端口没有变化。'; exit 0; fi
+  printf 'Snell 端口：%s → %s，PSK 不变。\n' "$old" "$new"
+  printf '请在服务商防火墙放行 TCP %s，并同步更新 iPhone 配置。\n' "$new"
+  read -r -p '请输入 YES 确认修改： ' confirm
+  [[ "$confirm" == YES ]] || { info '已取消，未进行修改。'; exit 0; }
 
   exec 9>/run/lock/snell-v6-port.lock
-  flock -n 9 || fail 'Another Snell port change is underway.'
-  [[ "$(current_port)" == "$old" ]] || fail 'Port changed concurrently; retry.'
+  flock -n 9 || fail '另一项端口修改正在进行。'
+  [[ "$(current_port)" == "$old" ]] || fail '端口已被其他操作修改，请重试。'
 
   # Test every actual configured IPv4/IPv6 TCP listen address, not just 0.0.0.0.
   python3 - "$CONF" "$new" <<'PY'
@@ -178,19 +178,19 @@ for entry in cfg.get('snell-server', 'listen').split(','):
         try:
             sock.bind((host, port))
         except OSError as ex:
-            raise SystemExit(f'TCP {host}:{port} not available: {ex}')
-print('PASS: New TCP port free on configured bind addresses.')
+            raise SystemExit(f'TCP {host}:{port} 不可用：{ex}')
+print('检查通过：新 TCP 端口未被占用。')
 PY
 
   rollback() {
     local rc=$?
     trap - EXIT HUP INT TERM
     if ((edited && ! committed)); then
-      info "Port change failed. Restoring TCP $old and restarting ONLY snell-v6.service..." >&2
+      info "端口修改失败，正在恢复 TCP $old 并仅重启 snell-v6.service……" >&2
       if cp -p -- "$backup" "$CONF" && systemctl restart snell-v6.service; then
-        info "Original Snell config and port $old restored." >&2
+        info "原配置和端口 $old 已恢复。" >&2
       else
-        info "WARNING: Rollback failed. Inspect service; backup kept at $backup." >&2
+        info "警告：回滚失败，请检查服务；备份保留在 $backup。" >&2
         exit "$rc"
       fi
     fi
@@ -209,7 +209,7 @@ old = path.read_text(encoding='utf-8')
 rx = re.compile(r'^(\s*listen\s*=\s*)([^\r\n]+)$', re.MULTILINE)
 matches = rx.findall(old)
 if len(matches) != 1:
-    raise SystemExit('Expected exactly one listen setting.')
+    raise SystemExit('配置中必须只有一项 listen 设置。')
 def rewrite(match):
     addresses = [item.strip() for item in match.group(2).split(',')]
     return match.group(1) + ','.join(item.rsplit(':', 1)[0] + ':' + str(port) for item in addresses)
@@ -229,7 +229,7 @@ finally:
         os.unlink(tmp)
 PY
   systemctl restart snell-v6.service
-  systemctl is-active --quiet snell-v6.service || fail 'Snell did not restart; rollback triggered.'
+  systemctl is-active --quiet snell-v6.service || fail 'Snell 重启失败，正在执行回滚。'
   python3 - "$CONF" "$new" <<'PY'
 import configparser, socket, sys, time
 cfg = configparser.ConfigParser(interpolation=None)
@@ -244,17 +244,17 @@ port = int(sys.argv[2])
 for _ in range(12):
     try:
         with socket.create_connection((host, port), timeout=1.0):
-            print('PASS: Snell v6 local TCP ready on', host, port)
+            print('检查通过：Snell v6 本地 TCP 监听正常：', host, port)
             break
     except OSError:
         time.sleep(.3)
 else:
-    raise SystemExit('New TCP listener not ready; rollback triggered.')
+    raise SystemExit('新 TCP 监听端口尚未就绪，正在回滚。')
 PY
   committed=1
   rm -f -- "$backup"
   backup=""
-  info "SUCCESS: Snell TCP port $old -> $new. PSK unchanged."
+  info "修改成功：Snell TCP 端口 $old → $new，PSK 不变。"
 
   # Private, root-owned local sing-box profiles only; match local PSK & old port.
   # Never update unrelated VPS nodes or any iPhone configuration remotely.
@@ -269,7 +269,7 @@ for path in pathlib.Path('/root').glob('*-ios.json'):
     try:
         st = path.lstat()
         if not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or st.st_mode & 0o077:
-            print('SKIP unsafe client JSON:', path.name)
+            print('跳过不安全的客户端 JSON：', path.name)
             continue
         doc = json.loads(path.read_text(encoding='utf-8'))
         matches = [
@@ -295,142 +295,142 @@ for path in pathlib.Path('/root').glob('*-ios.json'):
             if os.path.exists(temp):
                 os.unlink(temp)
         updated += 1
-        print('UPDATED client JSON:', path)
+        print('已更新客户端 JSON：', path)
     except (OSError, ValueError, TypeError, KeyError) as ex:
-        print('WARNING: Failed to update client:', path.name, type(ex).__name__)
-print('Private local iOS profiles updated:', updated)
+        print('警告：客户端配置更新失败：', path.name, type(ex).__name__)
+print('已更新的本地 iOS 私有配置数量：', updated)
 PY
   then
-    info 'WARNING: Some iOS JSON files may need manual port updates.' >&2
+    info '警告：部分 iOS JSON 文件可能仍需手动更新端口。' >&2
   fi
 
-  info "Ensure TCP $new is allowed by your VPS provider/security group."
-  info 'Re-import the updated JSON on iOS sing-box or change its server_port manually.'
-  info 'No SSH, firewall, other proxies, routing or PSK were modified.'
+  info "请确认 VPS 服务商防火墙已放行 TCP $new。"
+  info '请在 iOS sing-box 重新导入 JSON，或手动修改 server_port。'
+  info '未修改 SSH、防火墙、其他代理、路由或 PSK。'
 )
 install_snell() (
-  [[ $EUID -eq 0 ]] || fail 'Run as root.'
-  [[ -t 0 ]] || fail 'Interactive SSH terminal required.'
+  [[ $EUID -eq 0 ]] || fail '请使用 root 权限运行。'
+  [[ -t 0 ]] || fail '此操作需要交互式 SSH 终端。'
   case "$(installation_state)" in
-    present) precheck; info 'Snell already installed. Use sn status.'; exit 0 ;;
-    partial) fail 'Partial installation; will not overwrite.' ;;
+    present) precheck; info 'Snell 已安装，请运行 sn status 查看状态。'; exit 0 ;;
+    partial) fail '检测到不完整安装，拒绝覆盖。' ;;
   esac
-  command -v curl >/dev/null || fail 'curl required.'
-  command -v flock >/dev/null || fail 'flock required.'
+  command -v curl >/dev/null || fail '缺少 curl。'
+  command -v flock >/dev/null || fail '缺少 flock。'
   local server name port family answer tmpdir
   local -a extra_args=()
-  printf '\n===== Install Snell v6 =====\n'
-  read -r -p 'Public VPS IPv4/IPv6: ' server || fail 'IP required.'
-  [[ -n "$server" ]] || fail 'IP required.'
-  read -r -p 'Node name [Snell-v6]: ' name || fail 'Name required.'
+  printf '\n===== 一键安装 Snell v6 =====\n'
+  read -r -p '请输入 VPS 公网 IPv4/IPv6： ' server || fail '必须输入 IP 地址。'
+  [[ -n "$server" ]] || fail '必须输入 IP 地址。'
+  read -r -p '请输入节点名称 [Snell-v6]： ' name || fail '必须输入节点名称。'
   if [[ -z "$name" ]]; then name=Snell-v6; fi
-  [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,49}$ ]] || fail 'Invalid node name.'
-  read -r -p 'TCP port [17888]: ' port || fail 'Port required.'
+  [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,49}$ ]] || fail '节点名称格式错误。'
+  read -r -p '请输入 TCP 端口 [默认 17888]： ' port || fail '必须输入端口号。'
   if [[ -z "$port" ]]; then port=17888; fi
-  [[ "$port" =~ ^[0-9]{1,5}$ ]] || fail 'Invalid TCP port.'
+  [[ "$port" =~ ^[0-9]{1,5}$ ]] || fail '无效的 TCP 端口。'
   port=$((10#$port))
-  ((port >= 1024 && port <= 65535)) || fail 'Port must be 1024-65535.'
+  ((port >= 1024 && port <= 65535)) || fail '端口必须在 1024-65535 范围内。'
   family=ipv4
   if [[ "$server" == *:* ]]; then family=ipv6; fi
-  read -r -p "Listener family [ipv4/ipv6/dual] (default $family): " answer || fail 'Family required.'
+  read -r -p "监听模式 [ipv4/ipv6/dual，默认 $family]： " answer || fail '必须选择监听模式。'
   if [[ -n "$answer" ]]; then family=$answer; fi
-  case "$family" in ipv4|ipv6|dual) ;; *) fail 'Invalid listener family.' ;; esac
+  case "$family" in ipv4|ipv6|dual) ;; *) fail '监听模式无效。' ;; esac
   if [[ -e "/root/$name-ios.json" || -L "/root/$name-ios.json" ]]; then
-    read -r -p 'Existing private iOS profile will be REPLACED. Type YES: ' answer || fail 'Confirmation required.'
-    [[ "$answer" == YES ]] || { info 'Cancelled; existing profile retained.'; exit 0; }
+    read -r -p '已有同名 iOS 配置，确认覆盖请输入 YES： ' answer || fail '必须确认后才能继续。'
+    [[ "$answer" == YES ]] || { info '已取消，原有客户端配置已保留。'; exit 0; }
     extra_args+=(--replace-client)
   fi
-  printf 'Install Snell v6, TCP %s, %s listener, node %s.\n' "$port" "$family" "$name"
-  read -r -p 'Type INSTALL to continue: ' answer || fail 'Confirmation required.'
-  [[ "$answer" == INSTALL ]] || { info 'Cancelled.'; exit 0; }
+  printf '即将安装 Snell v6：TCP %s、监听模式 %s、节点 %s。\n' "$port" "$family" "$name"
+  read -r -p '请输入 INSTALL 确认安装： ' answer || fail '必须确认后才能继续。'
+  [[ "$answer" == INSTALL ]] || { info '操作已取消。'; exit 0; }
   exec 9>/run/lock/snell-v6-port.lock
-  flock -n 9 || fail 'Another Snell management action is running.'
-  [[ "$(installation_state)" == absent ]] || fail 'Snell paths changed; abort.'
+  flock -n 9 || fail '另一项 Snell 管理操作正在进行。'
+  [[ "$(installation_state)" == absent ]] || fail 'Snell 安装路径发生变化，已终止操作。'
   tmpdir=$(mktemp -d /tmp/sn-install.XXXXXXXX)
   trap 'rm -rf -- "$tmpdir"' EXIT
   curl --proto '=https' --tlsv1.2 -fL --retry 2 --connect-timeout 15 --max-time 120 \
     https://raw.githubusercontent.com/pansamrt/singboxSnell/main/snell-v6-oneclick.sh \
-    -o "$tmpdir/snell-v6-oneclick.sh" || fail 'Download failed.'
-  bash -n "$tmpdir/snell-v6-oneclick.sh" || fail 'Invalid downloaded script.'
+    -o "$tmpdir/snell-v6-oneclick.sh" || fail '下载失败。'
+  bash -n "$tmpdir/snell-v6-oneclick.sh" || fail '下载的脚本语法检查失败。'
   bash "$tmpdir/snell-v6-oneclick.sh" --server "$server" --name "$name" \
     --port "$port" --family "$family" "${extra_args[@]}"
-  info 'Snell installation completed; update/import your iOS client profile.'
+  info 'Snell 安装完成，请更新或导入 iOS 配置。'
 )
 uninstall_snell() (
-  [[ $EUID -eq 0 ]] || fail 'Run as root.'
-  [[ -t 0 ]] || fail 'Interactive SSH terminal required.'
+  [[ $EUID -eq 0 ]] || fail '请使用 root 权限运行。'
+  [[ -t 0 ]] || fail '此操作需要交互式 SSH 终端。'
   case "$(installation_state)" in
-    absent) info 'Snell not installed; sn manager is still available.'; exit 0 ;;
-    partial) fail 'Partial installation; will not delete unknown files.' ;;
+    absent) info 'Snell 未安装，sn 管理命令仍可使用。'; exit 0 ;;
+    partial) fail '检测到不完整安装，拒绝删除未知文件。' ;;
   esac
   precheck
   [[ "$(systemctl show snell-v6.service -p FragmentPath --value)" == "$UNIT" ]] ||
-    fail 'Unexpected loaded service unit.'
+    fail '当前 systemd 服务文件不符合预期。'
   [[ -z "$(systemctl show snell-v6.service -p DropInPaths --value)" ]] ||
-    fail 'Custom systemd service drop-ins detected; inspect first.'
+    fail '检测到自定义 systemd 服务附加配置，请先检查。'
   grep -Fxq 'User=snellv6' "$UNIT" && grep -Fxq 'Group=snellv6' "$UNIT" ||
-    fail 'Unexpected service user/group.'
+    fail '服务账户或用户组不符合预期。'
   [[ -z "$(find /opt/snell-v6 -mindepth 1 -maxdepth 1 ! -name snell-server -print -quit)" ]] ||
-    fail 'Unexpected files inside /opt/snell-v6; inspect first.'
+    fail '/opt/snell-v6 下存在未知文件，请先检查。'
   [[ -z "$(find /etc/snell-v6 -mindepth 1 -maxdepth 1 ! -name snell-server.conf ! -name subscription -print -quit)" ]] ||
-    fail 'Unexpected files inside /etc/snell-v6; inspect first.'
+    fail '/etc/snell-v6 下存在未知文件，请先检查。'
   if [[ -e /etc/snell-v6/subscription || -e /etc/systemd/system/snell-v6-subscription.service ]]; then
     [[ -x /usr/local/bin/sn-sub ]] ||
-      fail 'Subscription installation found but sn-sub manager missing; inspect before uninstalling.'
+      fail '检测到订阅服务但缺少 sn-sub 管理器，请检查后再卸载。'
   fi
-  printf '\n===== Uninstall Snell v6 =====\n'
-  printf 'Will stop and delete ONLY snell-v6.service, Snell executable and config.\n'
-  printf 'Keeps the sn manager and /root/*-ios.json client profile backups.\n'
-  printf 'Existing Snell client connections will STOP working.\n'
+  printf '\n===== 卸载 Snell v6 =====\n'
+  printf '将仅停止并删除 snell-v6.service、Snell 程序和配置。\n'
+  printf '保留 sn 管理命令与 /root/*-ios.json 配置备份。\n'
+  printf '注意：卸载将中断现有 Snell 客户端连接。\n'
   local answer
-  read -r -p 'Confirm uninstall Snell v6? [y/N]: ' answer || fail 'Confirmation required.'
+  read -r -p '确认卸载 Snell v6？[y/N]： ' answer || fail '必须确认后才能继续。'
   case "$answer" in
     y|Y) ;;
-    *) info 'Cancelled; Snell was not removed.'; exit 0 ;;
+    *) info '已取消，Snell 未被卸载。'; exit 0 ;;
   esac
   exec 9>/run/lock/snell-v6-port.lock
-  flock -n 9 || fail 'Another Snell management action is running.'
+  flock -n 9 || fail '另一项 Snell 管理操作正在进行。'
   precheck
   if [[ -e /etc/snell-v6/subscription || -e /etc/systemd/system/snell-v6-subscription.service ]]; then
     /usr/local/bin/sn-sub disable --yes ||
-      fail 'Could not safely disable HTTPS subscription; Snell was not removed.'
+      fail '无法安全停止 HTTPS 订阅，Snell 未被删除。'
   fi
-  systemctl disable --now snell-v6.service || fail 'Failed to stop Snell; files retained.'
-  if systemctl is-active --quiet snell-v6.service; then fail 'Snell still running; files retained.'; fi
+  systemctl disable --now snell-v6.service || fail '停止 Snell 失败，文件已保留。'
+  if systemctl is-active --quiet snell-v6.service; then fail 'Snell 仍在运行，文件已保留。'; fi
   rm -f -- "$UNIT"
   systemctl daemon-reload
   rm -f -- "$BIN" "$CONF"
-  rmdir -- /opt/snell-v6 /etc/snell-v6 || fail 'Snell files removed; inspect remaining directories.'
+  rmdir -- /opt/snell-v6 /etc/snell-v6 || fail 'Snell 文件已删除，请检查残余目录。'
   if getent passwd snellv6 >/dev/null 2>&1; then
     if [[ "$(getent passwd snellv6 | cut -d: -f6,7)" == /nonexistent:/usr/sbin/nologin ]]; then
-      userdel snellv6 || fail 'Snell removed but service account cleanup failed.'
+      userdel snellv6 || fail 'Snell 已删除，但清理服务用户失败。'
     else
-      info 'WARNING: customized snellv6 user retained; inspect before reinstalling.'
+      info '警告：自定义 snellv6 用户已保留，请在重装前检查。'
     fi
   fi
   if getent group snellv6 >/dev/null 2>&1; then
-    groupdel snellv6 || fail 'Snell removed but dedicated group cleanup failed.'
+    groupdel snellv6 || fail 'Snell 已删除，但清理用户组失败。'
   fi
-  info 'SUCCESS: Snell service removed. sn and private iOS JSON files retained.'
-  info 'Run sn install to reinstall; new PSK requires updating your clients.'
-  info 'SSH, Hysteria2, other proxies, firewall and routing were unchanged.'
+  info '卸载成功：Snell 已删除，sn 命令和 iOS 配置备份已保留。'
+  info '可运行 sn install 重新安装；生成的新 PSK 需要同步更新客户端。'
+  info '未更改 SSH、Hysteria2、其他代理、防火墙及路由。'
 )
 subscription_menu() (
-  [[ $EUID -eq 0 ]] || fail 'Run as root.'
+  [[ $EUID -eq 0 ]] || fail '请使用 root 权限运行。'
   local dest=/usr/local/bin/sn-sub temp refresh=0
   if [[ "${1:-}" == update ]]; then refresh=1; shift; fi
-  [[ -d /usr/local/bin && ! -L /usr/local/bin ]] || fail 'Unsafe /usr/local/bin.'
+  [[ -d /usr/local/bin && ! -L /usr/local/bin ]] || fail '/usr/local/bin 目录不安全。'
   if [[ -e "$dest" || -L "$dest" ]]; then
     [[ -f "$dest" && ! -L "$dest" && -x "$dest" &&
        "$(stat -c %u -- "$dest")" == 0 ]] ||
-      fail "Unsafe existing $dest; refusing to run."
+      fail "现有文件 $dest 不安全，拒绝执行。"
     grep -Fxq '# SNELL_V6_SUBSCRIPTION_MANAGER=1' "$dest" ||
-      fail "Existing $dest is not the project subscription manager."
+      fail "现有文件 $dest 不是本项目订阅管理器。"
   fi
   if (( refresh )) || [[ ! -e "$dest" && ! -L "$dest" ]]; then
-    command -v curl >/dev/null 2>&1 || fail 'curl is required to bootstrap subscriptions.'
+    command -v curl >/dev/null 2>&1 || fail '初始化订阅功能需要 curl。'
     temp=$(mktemp /usr/local/bin/.sn-sub.XXXXXXXX) ||
-      fail 'Cannot stage subscription manager.'
+      fail '无法暂存订阅管理器。'
     if ! curl --proto '=https' --tlsv1.2 -fL --retry 2 \
          --connect-timeout 15 --max-time 120 \
          https://raw.githubusercontent.com/pansamrt/singboxSnell/main/snell-v6-subscribe.sh \
@@ -438,11 +438,11 @@ subscription_menu() (
        ! grep -Fxq '# SNELL_V6_SUBSCRIPTION_MANAGER=1' "$temp" ||
        ! bash -n "$temp"; then
       rm -f -- "$temp"
-      fail 'Cannot download or verify the subscription manager.'
+      fail '无法下载或校验订阅管理器。'
     fi
     chmod 700 "$temp"
     mv -T -- "$temp" "$dest"
-    info 'Installed/updated local HTTPS subscription manager /usr/local/bin/sn-sub.'
+    info '已安装或更新 HTTPS 订阅管理器：/usr/local/bin/sn-sub。'
   fi
   if (( refresh )); then return 0; fi
   "$dest" "$@"
@@ -460,11 +460,11 @@ main() {
     install) install_snell ;;
     uninstall) uninstall_snell ;;
     "")
-      [[ -t 0 ]] || fail 'Interactive menu requires an SSH terminal.'
+      [[ -t 0 ]] || fail '管理菜单需要交互式 SSH 终端。'
       while true; do
-        printf '\n===== Snell v6 Manager v1.1.0 =====\n'
-        printf '  1) Change TCP port\n  2) Show status\n  3) Install Snell v6\n  4) Uninstall Snell v6\n  5) HTTPS subscription / QR\n  0) Exit\n'
-        read -r -p 'Choose [0-5]: ' choice || exit 0
+        printf '\n===== Snell v6 中文管理面板 v1.1.0 =====\n'
+        printf '  1) 修改 TCP 端口\n  2) 查看运行状态\n  3) 一键安装 Snell v6\n  4) 卸载 Snell v6\n  5) HTTPS 订阅和二维码\n  0) 退出\n'
+        read -r -p '请选择 [0-5]： ' choice || exit 0
         case "$choice" in
           1) change_port ;;
           2) show_status ;;
@@ -472,11 +472,11 @@ main() {
           4) uninstall_snell ;;
           5) subscription_menu ;;
           0) exit 0 ;;
-          *) info 'Invalid selection.' ;;
+          *) info '选项无效，请重新输入。' ;;
         esac
       done
       ;;
-    *) usage; fail 'Unknown command.' ;;
+    *) usage; fail '未知命令，请运行 sn --help。' ;;
   esac
 }
 main "$@"
