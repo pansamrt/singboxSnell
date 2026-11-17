@@ -21,6 +21,7 @@ Snell v6 standalone manager:
   sn sub          HTTPS subscription, domain/TLS and QR menu
   sn sub setup    Setup HTTPS subscription (existing ECC certificate or ACME)
   sn sub show     Show subscription URL and QR
+  sn sub update   Update local subscription helper from this project
   sn --help       Display this help
 EOF
 }
@@ -350,7 +351,8 @@ uninstall_snell() (
 )
 subscription_menu() (
   [[ $EUID -eq 0 ]] || fail 'Run as root.'
-  local dest=/usr/local/bin/sn-sub temp
+  local dest=/usr/local/bin/sn-sub temp refresh=0
+  if [[ "${1:-}" == update ]]; then refresh=1; shift; fi
   [[ -d /usr/local/bin && ! -L /usr/local/bin ]] || fail 'Unsafe /usr/local/bin.'
   if [[ -e "$dest" || -L "$dest" ]]; then
     [[ -f "$dest" && ! -L "$dest" && -x "$dest" &&
@@ -358,7 +360,8 @@ subscription_menu() (
       fail "Unsafe existing $dest; refusing to run."
     grep -Fxq '# SNELL_V6_SUBSCRIPTION_MANAGER=1' "$dest" ||
       fail "Existing $dest is not the project subscription manager."
-  else
+  fi
+  if (( refresh )) || [[ ! -e "$dest" && ! -L "$dest" ]]; then
     command -v curl >/dev/null 2>&1 || fail 'curl is required to bootstrap subscriptions.'
     temp=$(mktemp /usr/local/bin/.sn-sub.XXXXXXXX) ||
       fail 'Cannot stage subscription manager.'
@@ -373,8 +376,9 @@ subscription_menu() (
     fi
     chmod 700 "$temp"
     mv -T -- "$temp" "$dest"
-    info 'Installed local HTTPS subscription manager /usr/local/bin/sn-sub.'
+    info 'Installed/updated local HTTPS subscription manager /usr/local/bin/sn-sub.'
   fi
+  if (( refresh )); then return 0; fi
   "$dest" "$@"
 )
 main() {
