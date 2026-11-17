@@ -99,6 +99,19 @@ The HTTPS endpoint returns a complete sing-box remote-profile JSON with the curr
 
 **Lifecycle:** sn sub disable removes only its HTTPS service, settings and generated QR while retaining the original certificates and the Snell server. sn uninstall first disables the managed HTTPS endpoint and then removes only standalone Snell files. The script does not deliberately alter existing ygkkk sing-box, Hysteria2, SSH, provider firewall, DNS or routing. Reinstalling Snell generates new credentials; reconfigure/refresh clients after reinstalling.
 
+## HTTPS 订阅交互输入容错
+
+在 `sn sub menu` 选择 `1) 配置 HTTPS 订阅`，或直接执行 `sn sub setup` 时，域名、公网 IP、节点名称、HTTPS TCP 端口及监听模式如果输入无效，会提示原因并**重新要求输入当前字段**，而不是退出 SSH Shell。若选择的 HTTPS TCP 端口已被占用，也可重新选择其他端口。输入中断（例如 Ctrl+D）或后续真实服务/证书故障仍可能结束配置。
+
+节点名称是 sing-box/PassWall 的显示名称，不是 VPS 的文件名，因此支持内部空格和中文，例如 `HK Snell-v6` 或 `香港 Snell-v6`。名称最多 50 个字符，不允许首尾空格或控制字符。安装 Snell 服务时使用的 `--name` 命名限制仍维持原样，避免影响已有私有客户端配置文件路径。
+
+在已安装 `sn` 的 VPS 上运行以下命令更新管理组件（不改动已运行的 Snell）：
+
+~~~bash
+sn sub update
+sn sub setup
+~~~
+
 ## PassWall / iStoreOS：优先使用 snell:// 节点分享链接
 
 **区别：** sing-box 图形客户端的 `sing-box://import-remote-profile` 链接、HTTPS `/config.json` 配置订阅、`snell://` 节点分享链接，以及 HTTPS `/passwall.txt` 自动节点订阅是不同格式。
