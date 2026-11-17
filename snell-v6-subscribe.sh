@@ -187,7 +187,8 @@ show_links() {
       info '警告：qrencode 不可用，请通过 apt 安装 qrencode。'
   fi
   if command -v qrencode >/dev/null 2>&1; then
-    qrencode -t ANSIUTF8 "$snell_link" || true
+    info "终端二维码：sing-box 图形客户端导入链接（iOS 扫描使用）"
+    qrencode -t ANSIUTF8 "$deep" || true
     qrencode -o "$QR" -s 6 -m 2 "$url"
     qrencode -o "$QR_IMPORT" -s 6 -m 2 "$deep"
     qrencode -o "$QR_PASSWALL" -s 6 -m 2 "$snell_link"
