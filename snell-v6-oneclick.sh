@@ -366,7 +366,13 @@ done
 [[ $EUID -eq 0 ]] || fail 'Please run as root (sudo bash ...).'
 [[ -r /etc/os-release ]] || fail 'Cannot read /etc/os-release.'
 # shellcheck source=/etc/os-release
+# /etc/os-release also defines NAME and VERSION; preserve Snell's own values.
+SNELL_SAVED_NAME=$NAME
+SNELL_SAVED_VERSION=$VERSION
 . /etc/os-release
+NAME=$SNELL_SAVED_NAME
+VERSION=$SNELL_SAVED_VERSION
+unset SNELL_SAVED_NAME SNELL_SAVED_VERSION
 case "${ID}:${VERSION_ID}" in
   debian:12|debian:13|ubuntu:24.04) ;;
   *) fail "Unsupported OS: ${ID} ${VERSION_ID}; use Debian 12/13 or Ubuntu 24.04." ;;
