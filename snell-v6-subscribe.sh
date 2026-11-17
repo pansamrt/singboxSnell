@@ -430,6 +430,62 @@ disable() {
   rm -f -- "$QR" "$QR_IMPORT" "$QR_PASSWALL"
   info 'HTTPS 订阅已关闭，Snell 服务及原有 ACME 证书已保留。'
 }
+upgrade_backend() (
+  set -Eeuo pipefail
+  require_root
+  [[ -f "$SETTINGS" && ! -L "$SETTINGS" ]] || {
+    info '尚未配置 HTTPS 订阅，只需更新管理器，无须更新订阅服务。'
+    exit 0
+  }
+  [[ -f "$SRC" && ! -L "$SRC" && "$(stat -c %u "$SRC")" == 0 ]] ||
+    fail '现有订阅服务程序不存在或不安全，拒绝自动更新。'
+  ensure_known_unit "$UNIT"
+  [[ -f "$UNIT" ]] || fail '缺少订阅服务文件，请先人工检查。'
+  grep -Fqx 'ExecStart=/usr/bin/python3 -I /usr/local/lib/snell-v6/subscription_server.py' "$UNIT" ||
+    fail '订阅服务入口不符合预期，拒绝覆盖。'
+  command -v curl >/dev/null 2>&1 || fail '订阅服务升级需要 curl。'
+  exec 9>/run/lock/snell-v6-subscription.lock
+  flock -x 9 || fail '无法取得订阅服务管理锁。'
+  local temp backup
+  temp=$(mktemp /usr/local/lib/snell-v6/.subscription-update.XXXXXXXX) ||
+    fail '无法创建升级临时文件。'
+  if ! curl --proto '=https' --tlsv1.2 -fL --retry 2 --connect-timeout 15 \
+       --max-time 120 \
+       https://raw.githubusercontent.com/pansamrt/singboxSnell/main/snell-v6-subscription-server.py \
+       -o "$temp"; then
+    rm -f -- "$temp"
+    fail '下载新版订阅服务失败，原服务保持不变。'
+  fi
+  if ! python3 - "$temp" <<'PY'
+import ast,sys
+with open(sys.argv[1],encoding="utf-8") as f:ast.parse(f.read())
+PY
+  then
+    rm -f -- "$temp"
+    fail '新版订阅程序语法检查失败，原服务保持不变。'
+  fi
+  chmod 755 "$temp"
+  chown root:root "$temp"
+  backup=$(mktemp /usr/local/lib/snell-v6/.subscription-backup.XXXXXXXX)
+  cp -p -- "$SRC" "$backup"
+  mv -fT -- "$temp" "$SRC"
+  if /usr/bin/python3 -I "$SRC" --check &&
+     systemctl restart snell-v6-subscription.service &&
+     systemctl is-active --quiet snell-v6-subscription.service; then
+    rm -f -- "$backup"
+    info '升级成功：HTTPS 订阅服务已支持 PassWall 专用订阅。'
+    info 'Snell 的监听端口、PSK 和证书没有修改。'
+  else
+    info '新版订阅服务验证或启动失败，正在恢复旧版本……'
+    if cp -p -- "$backup" "$SRC" &&
+       systemctl restart snell-v6-subscription.service &&
+       systemctl is-active --quiet snell-v6-subscription.service; then
+      rm -f -- "$backup"
+      fail '升级已回滚，原订阅服务已恢复运行。'
+    fi
+    fail "自动回滚未成功，请保留备份并检查服务：$backup"
+  fi
+)
 menu() {
   [[ -t 0 ]] || fail '此操作需要交互式 SSH 终端。'
   while true; do
@@ -459,5 +515,6 @@ case "${1:-}" in
   rotate) rotate ;;
   disable) shift; disable "${1:-}" ;;
   sync-certs) sync_certs ;;
-  *) printf '用法：sn sub [setup|show|rotate|disable]\n'; exit 1 ;;
+  upgrade) upgrade_backend ;;
+  *) printf '用法：sn sub [setup|show|rotate|disable|upgrade]\n'; exit 1 ;;
 esac
