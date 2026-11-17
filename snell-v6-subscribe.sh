@@ -19,8 +19,8 @@ QR=/root/Snell-v6-subscription-qr.png
 QR_IMPORT=/root/Snell-v6-import-qr.png
 
 info() { printf '[sn-sub] %s\n' "$*"; }
-fail() { printf '[sn-sub] ERROR: %s\n' "$*" >&2; exit 1; }
-require_root() { [[ $EUID -eq 0 ]] || fail 'Run as root (sudo sn sub).'; }
+fail() { printf '[sn-sub] 错误： %s\n' "$*" >&2; exit 1; }
+require_root() { [[ $EUID -eq 0 ]] || fail '请使用 root 权限运行（sudo sn sub）。'; }
 read_setting() {
   python3 - "$SETTINGS" "$1" <<'PY'
 import json,sys
@@ -36,7 +36,7 @@ parts=domain.split('.')
 if len(domain)>253 or len(parts)<2 or not all(
     1<=len(p)<=63 and re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?', p)
     for p in parts):
-    raise SystemExit('Invalid hostname; use the DNS/ASCII name (punycode for IDN).')
+    raise SystemExit('无效域名，请输入 ASCII 域名（国际化域名需使用 Punycode）。')
 PY
 }
 cert_ok() {
@@ -52,21 +52,21 @@ PY
 }
 require_snell() {
   [[ -f "$SNELL" && ! -L "$SNELL" && -f "$SNELL_UNIT" ]] ||
-    fail 'Install the standalone Snell v6 server before creating a subscription.'
+    fail '请先安装独立 Snell v6 服务，再配置订阅。'
   grep -Fxq 'ExecStart=/opt/snell-v6/snell-server -c /etc/snell-v6/snell-server.conf' "$SNELL_UNIT" ||
-    fail 'Unexpected Snell service unit; refusing changes.'
-  systemctl is-active --quiet snell-v6.service || fail 'Snell service is not active.'
-  getent group snellv6 >/dev/null || fail 'Dedicated snellv6 service group missing.'
+    fail 'Snell 服务文件不符合预期，拒绝修改。'
+  systemctl is-active --quiet snell-v6.service || fail 'Snell 服务未运行。'
+  getent group snellv6 >/dev/null || fail '缺少专用 snellv6 用户组。'
 }
 suggest_domains() {
   local crt
-  printf '\nDomains found in local certificate SANs (hints only):\n'
+  printf '\n从本机证书 SAN 检测到的域名（仅供参考）：\n'
   for crt in /root/ygkkkca/fullchain.cer /root/ygkkkca/cert.crt \
       /etc/letsencrypt/live/*/fullchain.pem; do
     [[ -f "$crt" ]] || continue
     openssl x509 -in "$crt" -noout -ext subjectAltName 2>/dev/null || true
   done | grep -oE 'DNS:[A-Za-z0-9*._-]+' | sed 's/^DNS://' | grep -v '^\*' | sort -u || true
-  printf 'A domain is NOT automatically discoverable unless stored in local configuration/certificates.\n'
+  printf '仅能发现本地配置或证书中记录的域名，不能扫描全部域名。\n'
 }
 show_dns() {
   python3 - "$1" "$2" <<'PY'
@@ -75,17 +75,17 @@ domain,server=sys.argv[1:]
 try:
     found=sorted({row[4][0] for row in socket.getaddrinfo(domain,None)})
 except OSError as exc:
-    raise SystemExit('Domain DNS resolution failed: '+str(exc))
-print('DNS addresses for '+domain+': '+', '.join(found))
+    raise SystemExit('域名 DNS 解析失败： '+str(exc))
+print('域名解析地址：'+domain+': '+', '.join(found))
 try:
     ipaddress.ip_address(server)
 except ValueError:
     pass
 else:
     if server not in found:
-        print('WARNING: DNS does not match the supplied Snell server IP.')
-        print('If behind Cloudflare proxy, ensure the proxy supports the HTTPS port;')
-        print('the Snell TCP service usually needs a direct IP rather than a proxied name.')
+        print('警告：域名 DNS 解析结果与填写的 Snell 服务器 IP 不一致。')
+        print('如果使用 Cloudflare 代理，请确认其支持所选 HTTPS 端口；')
+        print('Snell TCP 服务通常需要直连 IP，而不是被代理的域名。')
 PY
 }
 ensure_known_unit() {
@@ -93,15 +93,15 @@ ensure_known_unit() {
   if [[ -e "$file" || -L "$file" ]]; then
     [[ -f "$file" && ! -L "$file" ]] || fail "Unsafe unit file: $file"
     grep -Fxq '# Managed by pansamrt/singboxSnell subscription' "$file" ||
-      fail "Unrelated systemd unit at $file; refusing overwrite."
+      fail "检测到非本项目的 systemd 服务文件 $file，拒绝覆盖。"
   fi
 }
 copy_certificates() {
   local crt=$1 key=$2 domain=$3 dest temp
-  cert_ok "$crt" "$key" "$domain" || fail 'Certificate invalid, expired/expiring, hostname mismatch, or key mismatch.'
-  [[ -d "$ROOT" && ! -L "$ROOT" ]] || fail 'Missing subscription directory.'
+  cert_ok "$crt" "$key" "$domain" || fail '证书不可用：可能已过期、即将过期、域名不匹配或密钥不匹配。'
+  [[ -d "$ROOT" && ! -L "$ROOT" ]] || fail '订阅目录不存在。'
   for dest in "$CERT" "$KEY"; do
-    [[ ! -L "$dest" ]] || fail 'Refusing a symlinked subscription certificate.'
+    [[ ! -L "$dest" ]] || fail '拒绝使用符号链接形式的订阅证书。'
   done
   if [[ -f "$CERT" && -f "$KEY" ]] &&
      cmp -s "$crt" "$CERT" && cmp -s "$key" "$KEY"; then
@@ -113,7 +113,7 @@ copy_certificates() {
   temp=$(mktemp "$ROOT/.key.XXXXXXXX")
   install -o root -g snellv6 -m 640 "$key" "$temp"
   mv -fT -- "$temp" "$KEY"
-  info 'TLS certificate/key refreshed from the existing source (source unchanged).'
+  info 'TLS 证书与密钥已从现有来源同步（原文件未修改）。'
 }
 sync_certs() {
   require_root
@@ -142,32 +142,32 @@ show_links() {
   local url deep
   url=$(links | sed -n '1p')
   deep=$(links | sed -n '2p')
-  info "Subscription HTTPS URL (KEEP SECRET): $url"
-  info "sing-box import URL (KEEP SECRET): $deep"
-  info "HTTPS service: $(systemctl is-active snell-v6-subscription.service 2>/dev/null || true)"
+  info "HTTPS 订阅地址（请保密）： $url"
+  info "sing-box 导入链接（请保密）： $deep"
+  info "HTTPS 服务状态： $(systemctl is-active snell-v6-subscription.service 2>/dev/null || true)"
   if ! command -v qrencode >/dev/null 2>&1; then
-    info 'Installing qrencode for QR display (optional)...'
+    info '正在安装 qrencode 以生成二维码（可选）……'
     apt-get install -y --no-install-recommends qrencode >/dev/null 2>&1 ||
-      info 'WARNING: qrencode unavailable. Install apt package qrencode for QR support.'
+      info '警告：qrencode 不可用，请通过 apt 安装 qrencode。'
   fi
   if command -v qrencode >/dev/null 2>&1; then
     qrencode -t ANSIUTF8 "$url" || true
     qrencode -o "$QR" -s 6 -m 2 "$url"
     qrencode -o "$QR_IMPORT" -s 6 -m 2 "$deep"
     chmod 600 "$QR" "$QR_IMPORT"
-    info "HTTPS subscription QR: $QR"
-    info "sing-box import QR: $QR_IMPORT"
-    info 'These QR files contain your secret access token. Do not share publicly.'
+    info "HTTPS 订阅二维码： $QR"
+    info "sing-box 导入二维码： $QR_IMPORT"
+    info '二维码含有私密访问令牌，请勿公开分享。'
   fi
 }
 rotate() {
   require_root
-  [[ -t 0 ]] || fail 'An interactive terminal is required.'
-  [[ -f "$SETTINGS" ]] || fail 'Subscription is not configured.'
+  [[ -t 0 ]] || fail '此操作需要交互式终端。'
+  [[ -f "$SETTINGS" ]] || fail '尚未配置订阅。'
   local answer
-  read -r -p 'Rotate access token? Old subscription URL will stop working [y/N]: ' answer ||
-    fail 'Confirmation required.'
-  [[ "$answer" == y || "$answer" == Y ]] || { info 'Cancelled.'; return 0; }
+  read -r -p '确认更换订阅令牌？旧订阅地址将立即失效 [y/N]： ' answer ||
+    fail '需要确认后才能继续。'
+  [[ "$answer" == y || "$answer" == Y ]] || { info '操作已取消。'; return 0; }
   python3 - "$SETTINGS" <<'PY'
 import json,os,pathlib,secrets,tempfile,sys
 p=pathlib.Path(sys.argv[1])
@@ -189,8 +189,8 @@ PY
 issue_cert() {
   local domain=$1 mail answer cert_name
   cert_name="snell-sub-$domain"
-  info 'No existing trusted certificate covers this domain.'
-  info 'ACME HTTP-01 requires public DNS pointing here and inbound TCP port 80.'
+  info '没有找到适用于该域名的可信证书。'
+  info 'ACME HTTP-01 需要公网 DNS 指向本 VPS，并允许外部访问 TCP 80。'
   python3 - <<'PY'
 import errno,socket
 for family,host in ((socket.AF_INET,"0.0.0.0"), (socket.AF_INET6,"::")):
@@ -201,17 +201,17 @@ for family,host in ((socket.AF_INET,"0.0.0.0"), (socket.AF_INET6,"::")):
     except OSError as exc:
         if family==socket.AF_INET6 and exc.errno in (errno.EAFNOSUPPORT,errno.EPROTONOSUPPORT):
             continue
-        raise SystemExit('TCP 80 is unavailable for ACME: '+str(exc))
+        raise SystemExit('TCP 80 无法用于 ACME 验证： '+str(exc))
 PY
-  read -r -p 'Issue a Let’s Encrypt ECC certificate using Certbot ACME? [y/N]: ' answer ||
-    fail 'Confirmation required.'
-  [[ "$answer" == y || "$answer" == Y ]] || fail 'Certificate issuance cancelled.'
+  read -r -p '使用 Certbot ACME 申请 Let's Encrypt ECC 证书？[y/N]： ' answer ||
+    fail '需要确认后才能继续。'
+  [[ "$answer" == y || "$answer" == Y ]] || fail '证书申请已取消。'
   if ! command -v certbot >/dev/null 2>&1; then
-    info 'Installing distribution Certbot via apt (does not change SSH or existing proxy settings).'
+    info '正在通过 apt 安装 Certbot（不会更改 SSH 或现有代理配置）。'
     apt-get update
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends certbot
   fi
-  read -r -p 'ACME registration email (blank = no email): ' mail || fail 'Email input required.'
+  read -r -p 'ACME 注册邮箱（直接回车表示不填写）： ' mail || fail '必须完成邮箱输入步骤。'
   local -a account=()
   if [[ -n "$mail" ]]; then
     account=(--email "$mail")
@@ -227,37 +227,37 @@ PY
 }
 setup() {
   require_root
-  [[ -t 0 ]] || fail 'Interactive SSH terminal required.'
+  [[ -t 0 ]] || fail '此操作需要交互式 SSH 终端。'
   require_snell
   local domain server name port family answer token tmpdir candidate settings_tmp
   if [[ -f "$SETTINGS" ]]; then
-    info 'HTTPS subscription already configured. Use sn sub show or sn sub rotate.'
-    info 'To change the domain/certificate, run sn sub disable first, then sn sub setup.'
+    info 'HTTPS 订阅已配置，请使用 sn sub show 查看或 sn sub rotate 更换令牌。'
+    info '如需更换域名或证书，请先运行 sn sub disable，再运行 sn sub setup。'
     return 0
   fi
   suggest_domains
-  read -r -p 'HTTPS subscription domain (DNS name, not IP): ' domain || fail 'Domain required.'
+  read -r -p '请输入 HTTPS 订阅域名（不是 IP）： ' domain || fail '必须输入域名。'
   validate_domain "$domain"
-  read -r -p 'Snell server public IPv4/IPv6 (for client connections): ' server || fail 'Snell server address required.'
+  read -r -p '请输入 Snell 服务器公网 IPv4/IPv6（客户端连接地址）： ' server || fail '必须输入 Snell 服务器地址。'
   python3 - "$server" <<'PY'
 import ipaddress,sys
 try:ipaddress.ip_address(sys.argv[1])
-except ValueError:raise SystemExit('Enter a public IP address, not a URL.')
+except ValueError:raise SystemExit('请输入公网 IP 地址，不能填写 URL。')
 PY
   show_dns "$domain" "$server"
-  read -r -p 'Node name [Snell-v6]: ' name || fail 'Node name required.'
+  read -r -p '节点名称 [默认 Snell-v6]： ' name || fail '必须填写节点名称。'
   if [[ -z "$name" ]]; then name=Snell-v6; fi
-  [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,49}$ ]] || fail 'Invalid node name.'
-  read -r -p 'HTTPS subscription TCP port [8443]: ' port || fail 'Port required.'
+  [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,49}$ ]] || fail '节点名称格式错误。'
+  read -r -p 'HTTPS 订阅 TCP 端口 [默认 8443]： ' port || fail '必须输入端口。'
   if [[ -z "$port" ]]; then port=8443; fi
-  [[ "$port" =~ ^[0-9]{1,5}$ ]] || fail 'Invalid port.'
+  [[ "$port" =~ ^[0-9]{1,5}$ ]] || fail '端口号无效。'
   port=$((10#$port))
-  (( port >= 1024 && port <= 65535 )) || fail 'Use an unprivileged HTTPS port 1024-65535.'
+  (( port >= 1024 && port <= 65535 )) || fail '请使用 1024-65535 范围内的 HTTPS 端口。'
   family=ipv4
   if [[ "$server" == *:* ]]; then family=ipv6; fi
-  read -r -p "HTTPS bind family [ipv4/ipv6] (default $family): " answer || fail 'Family required.'
+  read -r -p "HTTPS 监听模式 [ipv4/ipv6，默认 $family]： " answer || fail '必须选择监听模式。'
   if [[ -n "$answer" ]]; then family=$answer; fi
-  case "$family" in ipv4|ipv6) ;; *) fail 'Choose ipv4 or ipv6.' ;; esac
+  case "$family" in ipv4|ipv6) ;; *) fail '请选择 ipv4 或 ipv6。' ;; esac
   local existing_port=""
   if [[ -f "$SETTINGS" && ! -L "$SETTINGS" ]]; then
     existing_port=$(read_setting listen_port)
@@ -270,7 +270,7 @@ port=int(sys.argv[1]);ipv6=sys.argv[2]=="ipv6"
 with socket.socket(socket.AF_INET6 if ipv6 else socket.AF_INET,socket.SOCK_STREAM) as s:
     if ipv6:s.setsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY,1)
     s.bind(("::" if ipv6 else "0.0.0.0",port))
-print('PASS: HTTPS listen port is free.')
+print('检查通过：HTTPS 监听端口未被占用。')
 PY
   fi
   SOURCE_CERT=''
@@ -293,19 +293,19 @@ PY
   if [[ -z "$SOURCE_CERT" ]]; then
     issue_cert "$domain"
   else
-    info "Reusing existing domain certificate (read-only): $SOURCE_CERT"
+    info "正在复用已有域名证书（只读）： $SOURCE_CERT"
   fi
   cert_ok "$SOURCE_CERT" "$SOURCE_KEY" "$domain" ||
-    fail 'Selected certificate cannot be used for this domain.'
-  read -r -p 'Enable token-protected HTTPS subscription? [y/N]: ' answer ||
-    fail 'Confirmation required.'
-  [[ "$answer" == y || "$answer" == Y ]] || { info 'Cancelled.'; return 0; }
+    fail '所选证书无法用于此域名。'
+  read -r -p '确认启用令牌保护的 HTTPS 订阅？[y/N]： ' answer ||
+    fail '需要确认后才能继续。'
+  [[ "$answer" == y || "$answer" == Y ]] || { info '操作已取消。'; return 0; }
   exec 9>/run/lock/snell-v6-subscription.lock
   flock -x 9
   for candidate in "$UNIT" "$SYNC_UNIT" "$TIMER"; do ensure_known_unit "$candidate"; done
   if [[ -e "$ROOT" || -L "$ROOT" ]]; then
     [[ -d "$ROOT" && ! -L "$ROOT" && "$(stat -c %u "$ROOT")" == 0 ]] ||
-      fail 'Unexpected subscription directory.'
+      fail '订阅目录不符合预期。'
   else
     install -d -o root -g snellv6 -m 750 "$ROOT"
   fi
@@ -315,7 +315,7 @@ PY
   curl --proto '=https' --tlsv1.2 -fL --retry 2 \
     --connect-timeout 15 --max-time 120 \
     https://raw.githubusercontent.com/pansamrt/singboxSnell/main/snell-v6-subscription-server.py \
-    -o "$tmpdir/server.py" || fail 'Subscription backend download failed.'
+    -o "$tmpdir/server.py" || fail '下载订阅服务程序失败。'
   python3 - "$tmpdir/server.py" <<'PY'
 import ast,sys
 ast.parse(open(sys.argv[1],encoding="utf-8").read())
@@ -324,7 +324,7 @@ PY
   copy_certificates "$SOURCE_CERT" "$SOURCE_KEY" "$domain"
   token=$(openssl rand -hex 32)
   settings_tmp="$ROOT/.settings.new"
-  [[ ! -L "$SETTINGS" && ! -L "$settings_tmp" ]] || fail 'Unsafe subscription settings path.'
+  [[ ! -L "$SETTINGS" && ! -L "$settings_tmp" ]] || fail '订阅配置路径不安全。'
   python3 - "$settings_tmp" "$domain" "$port" "$name" "$family" "$server" "$token" "$SOURCE_CERT" "$SOURCE_KEY" <<'PY'
 import json,sys
 path,domain,port,name,family,address,token,crt,key=sys.argv[1:]
@@ -384,28 +384,28 @@ EOF
   systemctl daemon-reload
   systemctl enable snell-v6-subscription.service
   systemctl restart snell-v6-subscription.service ||
-    fail 'Subscription service failed; check journalctl -u snell-v6-subscription.service.'
+    fail '订阅服务启动失败，请检查 journalctl -u snell-v6-subscription.service。'
   systemctl enable --now snell-v6-subscription-cert-sync.timer
   systemctl is-active --quiet snell-v6-subscription.service ||
-    fail 'Subscription service is not running.'
-  info "HTTPS subscription enabled on $domain:$port."
-  info 'Existing Snell service, original certificates and other proxies were not modified.'
+    fail '订阅服务未运行。'
+  info "HTTPS 订阅已启用：$domain:$port。"
+  info '未修改现有 Snell 服务、原始证书或其他代理。'
   show_links
 }
 disable() {
   require_root
   local answer
   if [[ "$1" != --yes ]]; then
-    [[ -t 0 ]] || fail 'Interactive SSH terminal required.'
-    read -r -p 'Disable HTTPS subscription only (keep Snell)? [y/N]: ' answer ||
-      fail 'Confirmation required.'
-    [[ "$answer" == Y || "$answer" == y ]] || { info 'Cancelled.'; return 0; }
+    [[ -t 0 ]] || fail '此操作需要交互式 SSH 终端。'
+    read -r -p '确认关闭 HTTPS 订阅（保留 Snell 服务）？[y/N]： ' answer ||
+      fail '需要确认后才能继续。'
+    [[ "$answer" == Y || "$answer" == y ]] || { info '操作已取消。'; return 0; }
   fi
   local file
   for file in "$UNIT" "$SYNC_UNIT" "$TIMER"; do ensure_known_unit "$file"; done
   if systemctl is-active --quiet snell-v6-subscription.service; then
     [[ "$(systemctl show snell-v6-subscription.service -p FragmentPath --value)" == "$UNIT" ]] ||
-      fail 'Active subscription service has an unexpected systemd unit; refusing to stop it.'
+      fail '订阅服务文件不符合预期，为安全起见拒绝停止。'
   fi
   systemctl disable --now snell-v6-subscription-cert-sync.timer 2>/dev/null || true
   systemctl disable --now snell-v6-subscription.service 2>/dev/null || true
@@ -413,35 +413,35 @@ disable() {
     if [[ -f "$file" ]]; then rm -f -- "$file"; fi
   done
   systemctl daemon-reload
-  [[ ! -L "$ROOT" ]] || fail 'Subscription directory symlink; manual inspection required.'
+  [[ ! -L "$ROOT" ]] || fail '订阅目录是符号链接，请人工检查。'
   if [[ -d "$ROOT" ]]; then
     [[ -z "$(find "$ROOT" -mindepth 1 -maxdepth 1 \
        ! -name settings.json ! -name tls-fullchain.pem ! -name tls-key.pem -print -quit)" ]] ||
-       fail 'Unknown subscription files; manual inspection required.'
+       fail '订阅目录中存在未知文件，请人工检查。'
     rm -f -- "$SETTINGS" "$CERT" "$KEY"
     rmdir -- "$ROOT"
   fi
   rm -f -- "$QR" "$QR_IMPORT"
-  info 'HTTPS subscription disabled; Snell server and original ACME certificates retained.'
+  info 'HTTPS 订阅已关闭，Snell 服务及原有 ACME 证书已保留。'
 }
 menu() {
-  [[ -t 0 ]] || fail 'Interactive SSH terminal required.'
+  [[ -t 0 ]] || fail '此操作需要交互式 SSH 终端。'
   while true; do
-    printf '\n===== Snell HTTPS Subscription =====\n'
-    printf '  1) Setup HTTPS subscription\n'
-    printf '  2) Show subscription URL and QR\n'
-    printf '  3) Rotate subscription token\n'
-    printf '  4) Disable HTTPS subscription (keep Snell)\n'
-    printf '  0) Back\n'
+    printf '\n===== Snell HTTPS 订阅与二维码管理 =====\n'
+    printf '  1) 配置 HTTPS 订阅\n'
+    printf '  2) 查看订阅地址和二维码\n'
+    printf '  3) 更换订阅访问令牌\n'
+    printf '  4) 关闭 HTTPS 订阅（保留 Snell）\n'
+    printf '  0) 返回上一级\n'
     local answer
-    read -r -p 'Choose [0-4]: ' answer || return 0
+    read -r -p '请选择 [0-4]： ' answer || return 0
     case "$answer" in
       1) setup ;;
       2) show_links ;;
       3) rotate ;;
       4) disable "" ;;
       0) return 0 ;;
-      *) info 'Invalid choice.' ;;
+      *) info '选项无效，请重新输入。' ;;
     esac
   done
 }
@@ -453,5 +453,5 @@ case "${1:-}" in
   rotate) rotate ;;
   disable) shift; disable "${1:-}" ;;
   sync-certs) sync_certs ;;
-  *) printf 'Usage: sn sub [setup|show|rotate|disable]\n'; exit 1 ;;
+  *) printf '用法：sn sub [setup|show|rotate|disable]\n'; exit 1 ;;
 esac
