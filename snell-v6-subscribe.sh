@@ -263,7 +263,7 @@ PY
   SOURCE_CERT="/etc/letsencrypt/live/$cert_name/fullchain.pem"
   SOURCE_KEY="/etc/letsencrypt/live/$cert_name/privkey.pem"
 }
-setup() {
+setup() (
   require_root
   [[ -t 0 ]] || fail '此操作需要交互式 SSH 终端。'
   require_snell
@@ -474,7 +474,7 @@ EOF
   info "HTTPS 订阅已启用：$domain:$port。"
   info '未修改现有 Snell 服务、原始证书或其他代理。'
   show_links
-}
+)
 disable() {
   require_root
   local answer
