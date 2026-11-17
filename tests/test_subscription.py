@@ -116,6 +116,14 @@ class SubscriptionTest(unittest.TestCase):
                 thread.join(timeout=5)
 
 
+    def test_setup_default_https_port_is_5555(self):
+        helper = (Path(__file__).parents[1] / "snell-v6-subscribe.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("HTTPS 订阅 TCP 端口 [默认 5555]", helper)
+        self.assertIn('if [[ -z "$port" ]]; then port=5555; fi', helper)
+        self.assertNotIn('if [[ -z "$port" ]]; then port=8443; fi', helper)
+
     def test_sub_shortcut_displays_links_and_preserves_menu(self):
         root = Path(__file__).parents[1]
         helper = (root / "snell-v6-subscribe.sh").read_text(encoding="utf-8")
