@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Token-protected, HTTPS-only sing-box remote JSON for the standalone Snell v6 service."""
 import argparse
+import base64
 import configparser
 import hmac
 import http.server
@@ -9,7 +10,9 @@ import json
 import re
 import socket
 import ssl
+from ipaddress import ip_address
 from pathlib import Path
+from urllib.parse import quote
 
 SETTINGS = Path("/etc/snell-v6/subscription/settings.json")
 SNELL_CONF = Path("/etc/snell-v6/snell-server.conf")
@@ -65,6 +68,26 @@ def profile(settings):
     }
 
 
+def passwall_subscription(settings):
+    """PassWall node subscription: base64 of newline-separated snell:// URI(s).
+
+    PassWall's URL-subscription parser base64-decodes the whole response before
+    interpreting each scheme as a node, unlike sing-box's complete JSON profile.
+    """
+    outbound = profile(settings)["outbounds"][0]
+    address = outbound["server"]
+    # A bare IPv6 literal is invalid inside a URI host:port authority.
+    if ip_address(address).version == 6:
+        address = f"[{address}]"
+    uri = (
+        f"snell://{quote(outbound['psk'], safe='')}@{address}:"
+        f"{outbound['server_port']}?version=6"
+        f"&mode={quote(outbound['mode'], safe='')}"
+        f"#{quote(outbound['tag'], safe='')}"
+    )
+    return base64.b64encode((uri + "\n").encode("utf-8")) + b"\n"
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "SnellSubscription/1.1"
 
@@ -82,17 +105,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             settings = read_settings()
             requested = self.path.split("?", 1)[0]
-            expected = f"/s/{settings['token']}/config.json"
-            if not hmac.compare_digest(requested, expected):
+            prefix = f"/s/{settings['token']}/"
+            is_singbox = hmac.compare_digest(requested, prefix + "config.json")
+            is_passwall = hmac.compare_digest(requested, prefix + "passwall.txt")
+            if not (is_singbox or is_passwall):
                 self.send_error(404, "Not found")
                 return
-            data = (json.dumps(profile(settings), ensure_ascii=False,
-                               indent=2) + "\n").encode("utf-8")
+            if is_singbox:
+                data = (json.dumps(profile(settings), ensure_ascii=False,
+                                   indent=2) + "\n").encode("utf-8")
+                content_type = "application/json; charset=utf-8"
+            else:
+                data = passwall_subscription(settings)
+                content_type = "text/plain; charset=utf-8"
         except Exception:
             self.send_error(503, "Subscription unavailable")
             return
         self.send_response(200)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store, private")
         self.send_header("Pragma", "no-cache")
