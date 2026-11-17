@@ -269,7 +269,7 @@ setup() {
   require_snell
   local domain server name port family answer token tmpdir candidate settings_tmp
   if [[ -f "$SETTINGS" ]]; then
-    info 'HTTPS 订阅已配置，请使用 sn sub show 查看或 sn sub rotate 更换令牌。'
+    info 'HTTPS 订阅已配置，请使用 sn sub 查看或 sn sub rotate 更换令牌。'
     info '如需更换域名或证书，请先运行 sn sub disable，再运行 sn sub setup。'
     return 0
   fi
@@ -541,12 +541,13 @@ menu() {
 }
 require_root
 case "${1:-}" in
-  ""|menu) menu ;;
+  "") show_links ;;
+  menu) menu ;;
   setup) setup ;;
   show) show_links ;;
   rotate) rotate ;;
   disable) shift; disable "${1:-}" ;;
   sync-certs) sync_certs ;;
   upgrade) upgrade_backend ;;
-  *) printf '用法：sn sub [setup|show|rotate|disable|upgrade]\n'; exit 1 ;;
+  *) printf '用法：sn sub [menu|setup|show|rotate|disable|upgrade]\n'; exit 1 ;;
 esac
