@@ -22,6 +22,14 @@ QR_PASSWALL=/root/Snell-v6-passwall-qr.png
 info() { printf '[sn-sub] %s\n' "$*"; }
 fail() { printf '[sn-sub] 错误： %s\n' "$*" >&2; exit 1; }
 require_root() { [[ $EUID -eq 0 ]] || fail '请使用 root 权限运行（sudo sn sub）。'; }
+check_sub_dependencies() {
+  local prog missing=()
+  for prog in "$@"; do
+    command -v "$prog" >/dev/null 2>&1 || missing+=("$prog")
+  done
+  (( ${#missing[@]} == 0 )) ||
+    fail "缺少必要命令：${missing[*]}。请先通过 apt 安装对应 Debian/Ubuntu 软件包；不会自动修改现有系统。"
+}
 read_setting() {
   python3 - "$SETTINGS" "$1" <<'PY'
 import json,sys
@@ -182,9 +190,14 @@ show_links() {
   info '请在 PassWall「节点列表 → 导入分享URL」使用上面的 snell:// 链接。'
   info "HTTPS 服务状态： $(systemctl is-active snell-v6-subscription.service 2>/dev/null || true)"
   if ! command -v qrencode >/dev/null 2>&1; then
-    info '正在安装 qrencode 以生成二维码（可选）……'
-    apt-get install -y --no-install-recommends qrencode >/dev/null 2>&1 ||
-      info '警告：qrencode 不可用，请通过 apt 安装 qrencode。'
+    if command -v apt-get >/dev/null 2>&1; then
+      info '正在按需安装二维码工具 qrencode（仅该软件包）……'
+      if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends qrencode >/dev/null 2>&1; then
+        info '警告：无法自动安装 qrencode。可执行 apt-get update && apt-get install qrencode；订阅地址仍可复制使用。'
+      fi
+    else
+      info '警告：缺少 apt-get，无法自动安装可选的 qrencode。订阅地址仍可复制使用。'
+    fi
   fi
   if command -v qrencode >/dev/null 2>&1; then
     info "终端二维码：sing-box 图形客户端导入链接（iOS 扫描使用）"
@@ -246,9 +259,14 @@ PY
     fail '需要确认后才能继续。'
   [[ "$answer" == y || "$answer" == Y ]] || fail '证书申请已取消。'
   if ! command -v certbot >/dev/null 2>&1; then
+    command -v apt-get >/dev/null 2>&1 ||
+      fail '缺少 Certbot 且无法找到 apt-get，请手动安装 certbot 后重试。'
     info '正在通过 apt 安装 Certbot（不会更改 SSH 或现有代理配置）。'
-    apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends certbot
+    apt-get update || fail '无法更新 APT 软件包索引，Certbot 尚未安装。'
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends certbot ||
+      fail 'Certbot 安装失败，请检查 APT 错误并重新运行订阅配置。'
+    command -v certbot >/dev/null 2>&1 ||
+      fail 'Certbot 安装后未找到 certbot 命令。'
   fi
   read -r -p 'ACME 注册邮箱（直接回车表示不填写）： ' mail || fail '必须完成邮箱输入步骤。'
   local -a account=()
@@ -267,6 +285,7 @@ PY
 setup() (
   require_root
   [[ -t 0 ]] || fail '此操作需要交互式 SSH 终端。'
+  check_sub_dependencies python3 openssl curl flock systemctl getent stat mktemp install
   require_snell
   local domain server name port family answer token tmpdir candidate settings_tmp
   if [[ -f "$SETTINGS" ]]; then
