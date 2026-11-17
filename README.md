@@ -97,23 +97,25 @@ The HTTPS endpoint returns a complete sing-box remote-profile JSON with the curr
 
 **Lifecycle:** sn sub disable removes only its HTTPS service, settings and generated QR while retaining the original certificates and the Snell server. sn uninstall first disables the managed HTTPS endpoint and then removes only standalone Snell files. The script does not deliberately alter existing ygkkk sing-box, Hysteria2, SSH, provider firewall, DNS or routing. Reinstalling Snell generates new credentials; reconfigure/refresh clients after reinstalling.
 
-## PassWall / iStoreOS 专用 Snell v6 订阅
+## PassWall / iStoreOS：优先使用 snell:// 节点分享链接
 
-**区别：** sing-box 图形客户端的导入链接（sing-box://import-remote-profile）以及 HTTPS /config.json 订阅，提供的是 sing-box 完整配置，不能直接用作 PassWall 的节点订阅。
+**区别：** sing-box 图形客户端的 `sing-box://import-remote-profile` 链接、HTTPS `/config.json` 配置订阅、`snell://` 节点分享链接，以及 HTTPS `/passwall.txt` 自动节点订阅是不同格式。
 
-新版提供独立的 **PassWall HTTPS 节点订阅地址**：
-
-~~~text
-https://your-domain.example:8443/s/YOUR_PRIVATE_TOKEN/passwall.txt
-~~~
-
-该地址返回的是 **Base64 编码的 snell:// 节点列表**，而非 JSON。解码后的示例（均为占位信息）：
+执行 `sn sub show`，第三项会直接显示 **iStoreOS PassWall 节点分享链接（snell://）**，其二维码位于 `/root/Snell-v6-passwall-qr.png`。这个链接自动读取当前服务器 Snell PSK、实际监听端口及 mode，因此适合在 **PassWall → 节点列表 → 导入分享URL** 中导入；**不能**填入「节点订阅」的 HTTPS URL 输入框。示例：
 
 ~~~text
 snell://EXAMPLE_PSK@203.0.113.10:17888?version=6&mode=default#Snell-v6
 ~~~
 
-PassWall 上游订阅解析器会把 HTTPS 响应作为 Base64 节点列表解码，再将 snell:// 节点解析为 sing-box 类型，并读取 version=6、PSK、TCP 端口和加密模式。使用当前 Snell 服务配置实时生成该订阅；修改 sn port 后，下次 PassWall 更新订阅时会获得最新端口。HTTPS 8443（示例）是下载订阅的端口，而 Snell 数据连接端口由服务自身配置决定。
+直接导入后节点为静态配置；后续修改 Snell 监听端口或 PSK 时需重新导入。链接和二维码包含真实 PSK，请严禁公开传播。
+
+为保持兼容，第四项仍会显示原来的 **PassWall HTTPS 自动订阅地址（可选）**：
+
+~~~text
+https://your-domain.example:8443/s/YOUR_PRIVATE_TOKEN/passwall.txt
+~~~
+
+这个可选地址返回 **Base64 编码的 snell:// 节点列表**，不是完整 sing-box JSON。它需在 PassWall 的 **节点订阅** 页面使用，支持下次订阅刷新时同步端口；不能在「导入分享URL」里使用。HTTPS 8443（示例）是订阅下载端口，Snell 节点的真实 TCP 端口应以 `sn status` 为准。
 
 **已有 VPS 升级方式（原有 Snell 与订阅不需要重装）：**
 
@@ -125,9 +127,9 @@ sn sub update
 sn sub show
 ~~~
 
-sn sub update 会更新本地订阅管理脚本和实际运行的 HTTPS 后端，语法检查通过后仅重启 snell-v6-subscription.service；失败时尝试自动回滚。不会改变 Snell 监听端口、PSK、原始证书和 SSH。sn sub show 会额外显示 **iStoreOS PassWall 专用节点订阅**，并生成 /root/Snell-v6-passwall-qr.png（仅 root 可读取）。
+sn sub update 会更新本地订阅管理脚本和实际运行的 HTTPS 后端，语法检查通过后仅重启 snell-v6-subscription.service；失败时尝试自动回滚。不会改变 Snell 监听端口、PSK、原始证书和 SSH。sn sub show 会显示 **iStoreOS PassWall 节点分享链接（snell://）**，同时保留 HTTPS 自动订阅 URL；/root/Snell-v6-passwall-qr.png 对应 snell:// 分享链接，仅 root 可读取。
 
-**iStoreOS 设置：** 打开 PassWall → 节点订阅管理 → 添加订阅，在订阅地址栏粘贴 **/passwall.txt 结尾的完整 HTTPS URL**，保存并更新订阅。然后在节点列表检查协议为 sing-box / Snell v6，端口、PSK 和 mode=default 符合预期；在切换实际网关路由前单独测试节点。不要在 PassWall 的订阅 URL 栏直接粘贴 sing-box:// 链接、完整 sing-box JSON 或 snell:// 单节点分享地址。Snell 单节点可以在支持的节点分享链接导入界面中单独导入，但不会自动订阅更新。
+**iStoreOS 设置：** 推荐进入 PassWall → 节点列表 → 导入分享URL，粘贴 `sn sub show` 显示的 **snell://** 完整链接，检查节点类型为 sing-box / Snell，版本为 6，端口为服务器的真实 Snell 端口，然后单独测试连接。只有在需要自动节点订阅更新时，才使用 PassWall → 节点订阅管理添加 HTTPS `/passwall.txt` URL。不要把 `snell://` 分享链接误填在 HTTPS 订阅 URL 栏中，也不要把 HTTPS 订阅 URL 当成 HTTP 代理节点。
 
 **安全：** HTTPS 地址与二维码包含私有访问令牌，不能公开分享。曾经发在聊天、截图或日志中的令牌建议使用 sn sub rotate 轮换，再把新地址更新到 iOS 和 PassWall。轮换不会改变 Snell PSK；旧订阅地址失效。项目不会主动改动 iStoreOS、PassWall、Tailscale、Hysteria2 或既有家庭路由策略。
 
