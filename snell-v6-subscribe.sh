@@ -128,26 +128,58 @@ sync_certs() {
   copy_certificates "$source_cert" "$source_key" "$domain"
 }
 links() {
-  python3 - "$SETTINGS" <<'PY'
-import json,sys,urllib.parse
-with open(sys.argv[1],encoding='utf-8') as f:d=json.load(f)
+  python3 - "$SETTINGS" "$SNELL" <<'PY'
+import configparser, ipaddress, json, re, sys, urllib.parse
+with open(sys.argv[1],encoding='utf-8') as f:
+    d=json.load(f)
+cfg=configparser.ConfigParser(interpolation=None)
+with open(sys.argv[2],encoding='utf-8') as f:
+    cfg.read_file(f)
+psk=cfg.get("snell-server","psk")
+mode=cfg.get("snell-server","mode",fallback="default")
+if not psk or mode not in ("default","unshaped"):
+    raise SystemExit("Snell PSK 或模式无效，无法生成分享链接。")
+listeners=[x.strip() for x in cfg.get("snell-server","listen").split(",")]
+ports=set()
+for item in listeners:
+    match=re.fullmatch(r"(?:0\\.0\\.0\\.0|\\[::\\]|(?:\\d{1,3}\\.){3}\\d{1,3}|\\[[0-9a-fA-F:]+\\]):(\\d{1,5})",item)
+    if not match:
+        raise SystemExit("Snell 监听地址格式不受支持："+item)
+    ports.add(int(match.group(1)))
+if len(ports)!=1 or not 1024<=next(iter(ports))<=65535:
+    raise SystemExit("Snell 监听端口不一致或无效，无法生成分享链接。")
+address=ipaddress.ip_address(d["snell_address"])
+host=f"[{address}]" if address.version==6 else str(address)
+port=ports.pop()
 url=f"https://{d['domain']}:{d['listen_port']}/s/{d['token']}/config.json"
 deep="sing-box://import-remote-profile?url="+urllib.parse.quote(url,safe="")+"#"+urllib.parse.quote(d["node_name"],safe="")
+node=(f"snell://{urllib.parse.quote(psk,safe='')}@{host}:{port}"
+      f"?version=6&mode={urllib.parse.quote(mode,safe='')}"
+      f"#{urllib.parse.quote(d['node_name'],safe='')}")
 print(url)
 print(deep)
+print(node)
 print(url.replace("/config.json", "/passwall.txt"))
 PY
 }
 show_links() {
   require_root
-  [[ -f "$SETTINGS" && ! -L "$SETTINGS" ]] || fail 'Not configured; choose Setup first.'
-  local url deep passwall
-  url=$(links | sed -n '1p')
-  deep=$(links | sed -n '2p')
-  passwall=$(links | sed -n '3p')
+  [[ -f "$SETTINGS" && ! -L "$SETTINGS" ]] || fail '尚未配置 HTTPS 订阅，请先执行 sn sub setup。'
+  local url deep snell_link passwall_url
+  local -a outputs
+  mapfile -t outputs < <(links)
+  if (( ${#outputs[@]} != 4 )); then
+    fail '生成订阅与 Snell 分享链接失败，请检查服务端配置。'
+  fi
+  url=${outputs[0]}
+  deep=${outputs[1]}
+  snell_link=${outputs[2]}
+  passwall_url=${outputs[3]}
   info "iOS sing-box HTTPS 配置订阅（请保密）： $url"
   info "sing-box 图形客户端导入链接（请保密）： $deep"
-  info "iStoreOS PassWall 专用节点订阅（请保密）： $passwall"
+  info "iStoreOS PassWall 节点分享链接（snell://，请保密）： $snell_link"
+  info "PassWall HTTPS 自动订阅地址（可选，需从节点订阅页面使用）： $passwall_url"
+  info '请在 PassWall「节点列表 → 导入分享URL」使用上面的 snell:// 链接。'
   info "HTTPS 服务状态： $(systemctl is-active snell-v6-subscription.service 2>/dev/null || true)"
   if ! command -v qrencode >/dev/null 2>&1; then
     info '正在安装 qrencode 以生成二维码（可选）……'
@@ -155,15 +187,15 @@ show_links() {
       info '警告：qrencode 不可用，请通过 apt 安装 qrencode。'
   fi
   if command -v qrencode >/dev/null 2>&1; then
-    qrencode -t ANSIUTF8 "$url" || true
+    qrencode -t ANSIUTF8 "$snell_link" || true
     qrencode -o "$QR" -s 6 -m 2 "$url"
     qrencode -o "$QR_IMPORT" -s 6 -m 2 "$deep"
-    qrencode -o "$QR_PASSWALL" -s 6 -m 2 "$passwall"
+    qrencode -o "$QR_PASSWALL" -s 6 -m 2 "$snell_link"
     chmod 600 "$QR" "$QR_IMPORT" "$QR_PASSWALL"
     info "HTTPS 订阅二维码： $QR"
     info "sing-box 导入二维码： $QR_IMPORT"
-    info "PassWall 专用订阅二维码： $QR_PASSWALL"
-    info '二维码含有私密访问令牌，请勿公开分享。'
+    info "PassWall snell:// 节点分享二维码： $QR_PASSWALL"
+    info '节点分享链接及二维码含有实际 Snell PSK，请勿公开分享。'
   fi
 }
 rotate() {
