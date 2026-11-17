@@ -84,7 +84,8 @@ Snell v6 管理工具：
   sn port         修改 TCP 端口（失败自动回滚）
   sn install      一键安装 Snell v6
   sn uninstall    卸载 Snell v6（保留 sn 命令）
-  sn sub          HTTPS 订阅、域名证书与二维码管理
+  sn sub          直接显示订阅地址与二维码
+  sn sub menu     打开 HTTPS 订阅管理菜单
   sn sub setup    配置 HTTPS 订阅（复用 ECC 证书或申请 ACME）
   sn sub show     查看订阅地址和二维码
   sn sub update   更新订阅管理组件
@@ -473,7 +474,7 @@ main() {
           2) show_status ;;
           3) install_snell ;;
           4) uninstall_snell ;;
-          5) subscription_menu ;;
+          5) subscription_menu menu ;;
           0) exit 0 ;;
           *) info '选项无效，请重新输入。' ;;
         esac
