@@ -31,6 +31,16 @@ CREATED_UNIT=0
 
 info() { printf '[Snell-v6] %s\n' "$*"; }
 fail() { printf '[Snell-v6] ERROR: %s\n' "$*" >&2; exit 1; }
+check_dependency_commands() {
+  local cmd missing=()
+  for cmd in "$@"; do
+    command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+  done
+  if (( ${#missing[@]} )); then
+    fail "Missing command(s): ${missing[*]}. Install the corresponding Debian/Ubuntu packages before continuing; no automatic apt changes for an existing installation."
+  fi
+}
+
 usage() {
   cat <<'EOF'
 Usage: sudo bash snell-v6-oneclick.sh [--server PUBLIC_IP] [--name NODE_NAME]
@@ -563,6 +573,8 @@ PORT=$((10#$PORT))
 case "$FAMILY" in ipv4|ipv6|dual) ;; *) fail 'Use --family ipv4|ipv6|dual.' ;; esac
 
 if (( INSTALL_SN_ONLY )); then
+  # Installing the standalone manager is offline; check only its immediate tools.
+  check_dependency_commands mktemp grep stat
   count=0
   for path in "$BIN" "$CONF" "$UNIT"; do
     if [[ -e "$path" || -L "$path" ]]; then count=$((count+1)); fi
@@ -647,10 +659,16 @@ if (( ! EXISTING )); then
   info 'Installing required Debian/Ubuntu packages (no autoremove or kernel changes).'
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    curl unzip openssl ca-certificates iproute2 python3
+    curl unzip openssl ca-certificates iproute2 python3 \
+    util-linux passwd coreutils libc-bin
+  # These commands are used by Snell setup, rollback and the sn manager.
+  check_dependency_commands curl unzip openssl python3 flock useradd userdel \
+    getent sha256sum stat mktemp install systemctl grep sed
 else
   info 'Detected existing independent Snell installation; skipping apt and binary/service changes.'
-  command -v python3 >/dev/null 2>&1 || fail 'python3 required for iOS client generation.'
+  # Read-only check: never run apt or reinstall existing Snell or other proxies.
+  check_dependency_commands python3 curl openssl flock getent stat mktemp \
+    install systemctl grep sed
 fi
 
 # Confirm IP address and server-side listener compatibility without leaking keys.
