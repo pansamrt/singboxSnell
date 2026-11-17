@@ -120,8 +120,8 @@ class SubscriptionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             cfg = root / "snell.conf"
-            cfg.write_text("[snell-server]\\nlisten = [::]:17888\\n"
-                           "psk = strong-ipv6-test-secret\\nmode = default\\n",
+            cfg.write_text("[snell-server]\nlisten = [::]:17888\n"
+                           "psk = strong-ipv6-test-secret\nmode = default\n",
                            encoding="utf-8")
             spec = importlib.util.spec_from_file_location(
                 "subscription_server_ipv6", Path(__file__).parents[1] /
