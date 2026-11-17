@@ -160,6 +160,14 @@ bash /root/snell-v6-oneclick.sh --plan --server YOUR_PUBLIC_IPV4 --name KR-Snell
 
 The script installs dependencies only on a **new** installation, checks the upstream official HTTPS download and verifies the server version, verifies TCP socket availability, creates a non-login `snellv6` service user, sets up `snell-v6.service` with a private 0640 config and a random PSK, confirms the local listener, and writes a **root-only 0600** sing-box iOS profile. An existing complete independent installation is detected and reused without changing its service or PSK.
 
+## 依赖检查与自动安装
+
+**首次安装 Snell：** 在确认 Debian 12/13 或 Ubuntu 24.04、CPU 架构、systemd 及目标安装路径安全后，自动运行 APT 安装核心软件包：`curl`、`unzip`、`openssl`、`ca-certificates`、`iproute2`、`python3`、`util-linux`（`flock`）、`passwd`（`useradd/userdel`）、`coreutils`（`sha256sum/stat/mktemp`）和 `libc-bin`（`getent`）。安装后还会逐项确认相关命令可用。此操作不触碰 SSH、防火墙、系统路由或已有其他代理。
+
+**已有 Snell 安装：** 保留现有文件、端口、PSK 和服务，跳过 APT 与安装程序替换，仅检查后续生成客户端配置或执行管理操作需要的命令是否存在。缺失时明确提示命令名称，不自动安装或升级系统软件包。`--plan` 仍为只读模式；`--install-sn` 只安装或刷新本地 `sn` 管理命令。
+
+**订阅功能：** `sn sub setup` 检查核心所需命令；只有需要申请新证书且用户确认时才安装 `certbot`，只有需要展示二维码时才尝试安装可选的 `qrencode`。二维码工具安装失败不会阻止复制 HTTPS 或 `snell://` 链接。已有 Snell 不会因安装订阅依赖而重新安装。
+
 ## Explicit installation / reuse
 
 ```bash
