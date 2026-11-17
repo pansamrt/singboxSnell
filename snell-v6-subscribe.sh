@@ -142,7 +142,7 @@ if not psk or mode not in ("default","unshaped"):
 listeners=[x.strip() for x in cfg.get("snell-server","listen").split(",")]
 ports=set()
 for item in listeners:
-    match=re.fullmatch(r"(?:0\\.0\\.0\\.0|\\[::\\]|(?:\\d{1,3}\\.){3}\\d{1,3}|\\[[0-9a-fA-F:]+\\]):(\\d{1,5})",item)
+    match=re.fullmatch(r"(?:0\.0\.0\.0|\[::\]|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-fA-F:]+\]):(\d{1,5})",item)
     if not match:
         raise SystemExit("Snell 监听地址格式不受支持："+item)
     ports.add(int(match.group(1)))
