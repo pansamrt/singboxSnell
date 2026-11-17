@@ -274,43 +274,88 @@ setup() {
     return 0
   fi
   suggest_domains
-  read -r -p '请输入 HTTPS 订阅域名（不是 IP）： ' domain || fail '必须输入域名。'
-  validate_domain "$domain"
-  read -r -p '请输入 Snell 服务器公网 IPv4/IPv6（客户端连接地址）： ' server || fail '必须输入 Snell 服务器地址。'
-  python3 - "$server" <<'PY'
+  while true; do
+    read -r -p '请输入 HTTPS 订阅域名（不是 IP）： ' domain || fail '输入已中断。'
+    if validate_domain "$domain"; then
+      break
+    fi
+    info '域名格式错误，请重新输入域名。'
+  done
+  while true; do
+    read -r -p '请输入 Snell 服务器公网 IPv4/IPv6（客户端连接地址）： ' server ||
+      fail '输入已中断。'
+    if python3 - "$server" <<'PY'
 import ipaddress,sys
 try:ipaddress.ip_address(sys.argv[1])
-except ValueError:raise SystemExit('请输入公网 IP 地址，不能填写 URL。')
+except ValueError:raise SystemExit('请输入有效的 IPv4/IPv6 地址，不能填写 URL。')
 PY
-  show_dns "$domain" "$server"
-  read -r -p '节点名称 [默认 Snell-v6]： ' name || fail '必须填写节点名称。'
-  if [[ -z "$name" ]]; then name=Snell-v6; fi
-  [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,49}$ ]] || fail '节点名称格式错误。'
-  read -r -p 'HTTPS 订阅 TCP 端口 [默认 5555]： ' port || fail '必须输入端口。'
-  if [[ -z "$port" ]]; then port=5555; fi
-  [[ "$port" =~ ^[0-9]{1,5}$ ]] || fail '端口号无效。'
-  port=$((10#$port))
-  (( port >= 1024 && port <= 65535 )) || fail '请使用 1024-65535 范围内的 HTTPS 端口。'
-  family=ipv4
-  if [[ "$server" == *:* ]]; then family=ipv6; fi
-  read -r -p "HTTPS 监听模式 [ipv4/ipv6，默认 $family]： " answer || fail '必须选择监听模式。'
-  if [[ -n "$answer" ]]; then family=$answer; fi
-  case "$family" in ipv4|ipv6) ;; *) fail '请选择 ipv4 或 ipv6。' ;; esac
-  local existing_port=""
-  if [[ -f "$SETTINGS" && ! -L "$SETTINGS" ]]; then
-    existing_port=$(read_setting listen_port)
+    then
+      break
+    fi
+    info '服务器 IP 格式错误，请重新输入。'
+  done
+  if ! show_dns "$domain" "$server"; then
+    info '域名 DNS 解析检查未通过，请核实域名后重新运行配置。'
+    return 1
   fi
-  if ! systemctl is-active --quiet snell-v6-subscription.service ||
-     [[ "$existing_port" != "$port" ]]; then
-    python3 - "$port" "$family" <<'PY'
+  while true; do
+    read -r -p '节点名称 [默认 Snell-v6，可含空格/中文]： ' name ||
+      fail '输入已中断。'
+    [[ -n "$name" ]] || name=Snell-v6
+    if python3 - "$name" <<'PY'
+import sys
+name=sys.argv[1]
+if not (1<=len(name)<=50) or name!=name.strip() or any(
+    ord(ch)<32 or ord(ch)==127 for ch in name
+):
+    raise SystemExit('节点名称须为 1-50 个字符，可含空格或中文；不可有首尾空格和控制字符。')
+PY
+    then
+      break
+    fi
+    info '节点名称格式错误，请重新输入。'
+  done
+  while true; do
+    read -r -p 'HTTPS 订阅 TCP 端口 [默认 5555]： ' port || fail '输入已中断。'
+    [[ -n "$port" ]] || port=5555
+    if [[ ! "$port" =~ ^[0-9]{1,5}$ ]]; then
+      info '端口号无效，请输入 1024-65535 范围内的数字。'
+      continue
+    fi
+    port=$((10#$port))
+    if ((port<1024 || port>65535)); then
+      info '端口必须为 1024-65535，请重新输入。'
+      continue
+    fi
+    family=ipv4
+    [[ "$server" != *:* ]] || family=ipv6
+    local default_family=$family
+    while true; do
+      read -r -p "HTTPS 监听模式 [ipv4/ipv6，默认 $default_family]： " answer ||
+        fail '输入已中断。'
+      family=$default_family
+      [[ -z "$answer" ]] || family=$answer
+      case "$family" in
+        ipv4|ipv6) break ;;
+        *) info '监听模式无效，请输入 ipv4 或 ipv6。' ;;
+      esac
+    done
+    if python3 - "$port" "$family" <<'PY'
 import socket,sys
 port=int(sys.argv[1]);ipv6=sys.argv[2]=="ipv6"
-with socket.socket(socket.AF_INET6 if ipv6 else socket.AF_INET,socket.SOCK_STREAM) as s:
-    if ipv6:s.setsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY,1)
-    s.bind(("::" if ipv6 else "0.0.0.0",port))
+try:
+    with socket.socket(socket.AF_INET6 if ipv6 else socket.AF_INET,socket.SOCK_STREAM) as s:
+        if ipv6:s.setsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY,1)
+        s.bind(("::" if ipv6 else "0.0.0.0",port))
+except OSError as exc:
+    raise SystemExit(f'HTTPS 监听端口 {port} 不可用：{exc}')
 print('检查通过：HTTPS 监听端口未被占用。')
 PY
-  fi
+    then
+      break
+    fi
+    info 'HTTPS 监听端口不可用，请重新选择端口。'
+  done
   SOURCE_CERT=''
   SOURCE_KEY=''
   for candidate in /root/ygkkkca/fullchain.cer /root/ygkkkca/cert.crt; do
