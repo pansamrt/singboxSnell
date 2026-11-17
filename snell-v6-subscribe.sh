@@ -17,6 +17,7 @@ SYNC_UNIT=/etc/systemd/system/snell-v6-subscription-cert-sync.service
 TIMER=/etc/systemd/system/snell-v6-subscription-cert-sync.timer
 QR=/root/Snell-v6-subscription-qr.png
 QR_IMPORT=/root/Snell-v6-import-qr.png
+QR_PASSWALL=/root/Snell-v6-passwall-qr.png
 
 info() { printf '[sn-sub] %s\n' "$*"; }
 fail() { printf '[sn-sub] 错误： %s\n' "$*" >&2; exit 1; }
@@ -134,16 +135,19 @@ url=f"https://{d['domain']}:{d['listen_port']}/s/{d['token']}/config.json"
 deep="sing-box://import-remote-profile?url="+urllib.parse.quote(url,safe="")+"#"+urllib.parse.quote(d["node_name"],safe="")
 print(url)
 print(deep)
+print(url.replace("/config.json", "/passwall.txt"))
 PY
 }
 show_links() {
   require_root
   [[ -f "$SETTINGS" && ! -L "$SETTINGS" ]] || fail 'Not configured; choose Setup first.'
-  local url deep
+  local url deep passwall
   url=$(links | sed -n '1p')
   deep=$(links | sed -n '2p')
-  info "HTTPS 订阅地址（请保密）： $url"
-  info "sing-box 导入链接（请保密）： $deep"
+  passwall=$(links | sed -n '3p')
+  info "iOS sing-box HTTPS 配置订阅（请保密）： $url"
+  info "sing-box 图形客户端导入链接（请保密）： $deep"
+  info "iStoreOS PassWall 专用节点订阅（请保密）： $passwall"
   info "HTTPS 服务状态： $(systemctl is-active snell-v6-subscription.service 2>/dev/null || true)"
   if ! command -v qrencode >/dev/null 2>&1; then
     info '正在安装 qrencode 以生成二维码（可选）……'
@@ -154,9 +158,11 @@ show_links() {
     qrencode -t ANSIUTF8 "$url" || true
     qrencode -o "$QR" -s 6 -m 2 "$url"
     qrencode -o "$QR_IMPORT" -s 6 -m 2 "$deep"
-    chmod 600 "$QR" "$QR_IMPORT"
+    qrencode -o "$QR_PASSWALL" -s 6 -m 2 "$passwall"
+    chmod 600 "$QR" "$QR_IMPORT" "$QR_PASSWALL"
     info "HTTPS 订阅二维码： $QR"
     info "sing-box 导入二维码： $QR_IMPORT"
+    info "PassWall 专用订阅二维码： $QR_PASSWALL"
     info '二维码含有私密访问令牌，请勿公开分享。'
   fi
 }
@@ -421,7 +427,7 @@ disable() {
     rm -f -- "$SETTINGS" "$CERT" "$KEY"
     rmdir -- "$ROOT"
   fi
-  rm -f -- "$QR" "$QR_IMPORT"
+  rm -f -- "$QR" "$QR_IMPORT" "$QR_PASSWALL"
   info 'HTTPS 订阅已关闭，Snell 服务及原有 ACME 证书已保留。'
 }
 menu() {
