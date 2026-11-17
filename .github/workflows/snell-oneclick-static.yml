@@ -32,3 +32,8 @@ jobs:
           PY
           test -s README.md
           echo 'PASS: script syntax and help; no VPS changes or network access'
+      - name: Mocked Snell port-manager lifecycle (ephemeral GitHub runner)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo python3 tests/test-sn-port-manager.py
