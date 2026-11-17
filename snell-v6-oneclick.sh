@@ -84,6 +84,9 @@ Snell v6 standalone manager:
   sn port         Change TCP port with interactive prompt and rollback
   sn install      Install standalone Snell v6 (guided)
   sn uninstall    Remove standalone Snell v6, keep sn command
+  sn sub          HTTPS subscription, domain/TLS and QR menu
+  sn sub setup    Setup HTTPS subscription (existing ECC certificate or ACME)
+  sn sub show     Show subscription URL and QR
   sn --help       Display this help
 EOF
 }
@@ -368,8 +371,12 @@ uninstall_snell() (
     fail 'Unexpected service user/group.'
   [[ -z "$(find /opt/snell-v6 -mindepth 1 -maxdepth 1 ! -name snell-server -print -quit)" ]] ||
     fail 'Unexpected files inside /opt/snell-v6; inspect first.'
-  [[ -z "$(find /etc/snell-v6 -mindepth 1 -maxdepth 1 ! -name snell-server.conf -print -quit)" ]] ||
+  [[ -z "$(find /etc/snell-v6 -mindepth 1 -maxdepth 1 ! -name snell-server.conf ! -name subscription -print -quit)" ]] ||
     fail 'Unexpected files inside /etc/snell-v6; inspect first.'
+  if [[ -e /etc/snell-v6/subscription || -e /etc/systemd/system/snell-v6-subscription.service ]]; then
+    [[ -x /usr/local/bin/sn-sub ]] ||
+      fail 'Subscription installation found but sn-sub manager missing; inspect before uninstalling.'
+  fi
   printf '\n===== Uninstall Snell v6 =====\n'
   printf 'Will stop and delete ONLY snell-v6.service, Snell executable and config.\n'
   printf 'Keeps the sn manager and /root/*-ios.json client profile backups.\n'
@@ -383,6 +390,10 @@ uninstall_snell() (
   exec 9>/run/lock/snell-v6-port.lock
   flock -n 9 || fail 'Another Snell management action is running.'
   precheck
+  if [[ -e /etc/snell-v6/subscription || -e /etc/systemd/system/snell-v6-subscription.service ]]; then
+    /usr/local/bin/sn-sub disable --yes ||
+      fail 'Could not safely disable HTTPS subscription; Snell was not removed.'
+  fi
   systemctl disable --now snell-v6.service || fail 'Failed to stop Snell; files retained.'
   if systemctl is-active --quiet snell-v6.service; then fail 'Snell still running; files retained.'; fi
   rm -f -- "$UNIT"
@@ -403,7 +414,41 @@ uninstall_snell() (
   info 'Run sn install to reinstall; new PSK requires updating your clients.'
   info 'SSH, Hysteria2, other proxies, firewall and routing were unchanged.'
 )
+subscription_menu() (
+  [[ $EUID -eq 0 ]] || fail 'Run as root.'
+  local dest=/usr/local/bin/sn-sub temp
+  [[ -d /usr/local/bin && ! -L /usr/local/bin ]] || fail 'Unsafe /usr/local/bin.'
+  if [[ -e "$dest" || -L "$dest" ]]; then
+    [[ -f "$dest" && ! -L "$dest" && -x "$dest" &&
+       "$(stat -c %u -- "$dest")" == 0 ]] ||
+      fail "Unsafe existing $dest; refusing to run."
+    grep -Fxq '# SNELL_V6_SUBSCRIPTION_MANAGER=1' "$dest" ||
+      fail "Existing $dest is not the project subscription manager."
+  else
+    command -v curl >/dev/null 2>&1 || fail 'curl is required to bootstrap subscriptions.'
+    temp=$(mktemp /usr/local/bin/.sn-sub.XXXXXXXX) ||
+      fail 'Cannot stage subscription manager.'
+    if ! curl --proto '=https' --tlsv1.2 -fL --retry 2 \
+         --connect-timeout 15 --max-time 120 \
+         https://raw.githubusercontent.com/pansamrt/singboxSnell/main/snell-v6-subscribe.sh \
+         -o "$temp" ||
+       ! grep -Fxq '# SNELL_V6_SUBSCRIPTION_MANAGER=1' "$temp" ||
+       ! bash -n "$temp"; then
+      rm -f -- "$temp"
+      fail 'Cannot download or verify the subscription manager.'
+    fi
+    chmod 700 "$temp"
+    mv -T -- "$temp" "$dest"
+    info 'Installed local HTTPS subscription manager /usr/local/bin/sn-sub.'
+  fi
+  "$dest" "$@"
+)
 main() {
+  if (( $# >= 1 )) && [[ "$1" == sub ]]; then
+    shift
+    subscription_menu "$@"
+    return
+  fi
   case "$*" in
     --help|-h|help) usage ;;
     status) show_status ;;
@@ -413,14 +458,15 @@ main() {
     "")
       [[ -t 0 ]] || fail 'Interactive menu requires an SSH terminal.'
       while true; do
-        printf '\n===== Snell v6 Manager =====\n'
-        printf '  1) Change TCP port\n  2) Show status\n  3) Install Snell v6\n  4) Uninstall Snell v6\n  0) Exit\n'
-        read -r -p 'Choose [0-4]: ' choice || exit 0
+        printf '\n===== Snell v6 Manager v1.1.0 =====\n'
+        printf '  1) Change TCP port\n  2) Show status\n  3) Install Snell v6\n  4) Uninstall Snell v6\n  5) HTTPS subscription / QR\n  0) Exit\n'
+        read -r -p 'Choose [0-5]: ' choice || exit 0
         case "$choice" in
           1) change_port ;;
           2) show_status ;;
           3) install_snell ;;
           4) uninstall_snell ;;
+          5) subscription_menu ;;
           0) exit 0 ;;
           *) info 'Invalid selection.' ;;
         esac
