@@ -85,10 +85,12 @@ After updating the local sn command using the normal --install-sn procedure, cho
 
 To switch the configured HTTPS domain or certificate after setup, first run **sn sub disable**, then **sn sub setup**; the first-time setup intentionally avoids overwriting a live subscription.
 
-**Subscription URL and import QR:** the helper creates a token-protected, read-only HTTPS server on **TCP 8443 by default**; it does not occupy 443, SSH or Snell's data port 17888. Open the selected HTTPS TCP port in the VPS provider's firewall. The URL follows this form:
+**Existing installations:** changing the setup default to TCP **5555** does not migrate or restart an existing HTTPS subscription. The configured port remains unchanged until an operator deliberately reconfigures it. Ensure provider firewall permits the chosen TCP port.
+
+**Subscription URL and import QR:** the helper creates a token-protected, read-only HTTPS server on **TCP 5555 by default**; it does not occupy 443, SSH or Snell's data port 17888. Open the selected HTTPS TCP port in the VPS provider's firewall. The URL follows this form:
 
 ~~~text
-https://your-domain.example:8443/s/SECRET_TOKEN/config.json
+https://your-domain.example:5555/s/SECRET_TOKEN/config.json
 ~~~
 
 The HTTPS endpoint returns a complete sing-box remote-profile JSON with the currently configured Snell PSK and TCP port. The QR facility outputs terminal QR (if qrencode is available), a raw subscription URL QR at /root/Snell-v6-subscription-qr.png, and a sing-box import-link QR at /root/Snell-v6-import-qr.png. Both PNGs are intended to remain root-only. Use sing-box Remote Profile URL import or compatible QR scanning, then test actual client connectivity.
@@ -112,10 +114,10 @@ snell://EXAMPLE_PSK@203.0.113.10:17888?version=6&mode=default#Snell-v6
 为保持兼容，第四项仍会显示原来的 **PassWall HTTPS 自动订阅地址（可选）**：
 
 ~~~text
-https://your-domain.example:8443/s/YOUR_PRIVATE_TOKEN/passwall.txt
+https://your-domain.example:5555/s/YOUR_PRIVATE_TOKEN/passwall.txt
 ~~~
 
-这个可选地址返回 **Base64 编码的 snell:// 节点列表**，不是完整 sing-box JSON。它需在 PassWall 的 **节点订阅** 页面使用，支持下次订阅刷新时同步端口；不能在「导入分享URL」里使用。HTTPS 8443（示例）是订阅下载端口，Snell 节点的真实 TCP 端口应以 `sn status` 为准。
+这个可选地址返回 **Base64 编码的 snell:// 节点列表**，不是完整 sing-box JSON。它需在 PassWall 的 **节点订阅** 页面使用，支持下次订阅刷新时同步端口；不能在「导入分享URL」里使用。HTTPS 5555（示例）是订阅下载端口，Snell 节点的真实 TCP 端口应以 `sn status` 为准。
 
 **已有 VPS 升级方式（原有 Snell 与订阅不需要重装）：**
 
