@@ -22,10 +22,9 @@ Entry point: [`snell-v6-oneclick.sh`](snell-v6-oneclick.sh).
 cd /root
 
 curl -fL \
-https://raw.githubusercontent.com/pansamrt/singboxSnell/main/snell-v6-oneclick.sh \
--o snell-v6-oneclick.sh
-
-bash -n snell-v6-oneclick.sh &&
+  https://raw.githubusercontent.com/pansamrt/singboxSnell/main/snell-v6-oneclick.sh \
+  -o snell-v6-oneclick.sh && \
+bash -n snell-v6-oneclick.sh && \
 bash snell-v6-oneclick.sh
 ```
 
