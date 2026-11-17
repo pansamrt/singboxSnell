@@ -112,6 +112,8 @@ sn sub update
 sn sub setup
 ~~~
 
+**终端二维码说明：** 执行 `sn sub` 时，SSH 终端直接显示的二维码现在对应 **sing-box 图形客户端导入链接**（`sing-box://import-remote-profile?...`），适合在支持该 URI 的 iOS 客户端扫描。该二维码不是 PassWall 的 `snell://` 分享二维码。若需要手动添加 iOS 远程配置，复制 `sn sub` 输出的 HTTPS `/config.json` 地址填写 URL。文件二维码分别保留：`/root/Snell-v6-import-qr.png` 为 sing-box 导入链接，`/root/Snell-v6-passwall-qr.png` 为 PassWall `snell://` 分享链接，`/root/Snell-v6-subscription-qr.png` 为 HTTPS JSON 配置链接。均涉及敏感订阅凭据，不要公开。
+
 ## PassWall / iStoreOS：优先使用 snell:// 节点分享链接
 
 **区别：** sing-box 图形客户端的 `sing-box://import-remote-profile` 链接、HTTPS `/config.json` 配置订阅、`snell://` 节点分享链接，以及 HTTPS `/passwall.txt` 自动节点订阅是不同格式。
