@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
+# SNELL_V6_SUBSCRIPTION_MANAGER=1
 # HTTPS sing-box subscription manager for standalone Snell v6. No changes to other proxies.
 set -Eeuo pipefail
 umask 077
@@ -227,7 +228,7 @@ setup() {
   require_root
   [[ -t 0 ]] || fail 'Interactive SSH terminal required.'
   require_snell
-  local domain server name port family answer token tmpdir candidate
+  local domain server name port family answer token tmpdir candidate settings_tmp
   if [[ -f "$SETTINGS" ]]; then
     read -r -p 'HTTPS subscription exists. Reconfigure and rotate token? [y/N]: ' answer ||
       fail 'Confirmation required.'
@@ -256,7 +257,12 @@ PY
   read -r -p "HTTPS bind family [ipv4/ipv6] (default $family): " answer || fail 'Family required.'
   if [[ -n "$answer" ]]; then family=$answer; fi
   case "$family" in ipv4|ipv6) ;; *) fail 'Choose ipv4 or ipv6.' ;; esac
-  if ! systemctl is-active --quiet snell-v6-subscription.service; then
+  local existing_port=""
+  if [[ -f "$SETTINGS" && ! -L "$SETTINGS" ]]; then
+    existing_port=$(read_setting listen_port)
+  fi
+  if ! systemctl is-active --quiet snell-v6-subscription.service ||
+     [[ "$existing_port" != "$port" ]]; then
     python3 - "$port" "$family" <<'PY'
 import socket,sys
 port=int(sys.argv[1]);ipv6=sys.argv[2]=="ipv6"
@@ -316,18 +322,18 @@ PY
   install -o root -g root -m 755 "$tmpdir/server.py" "$SRC"
   copy_certificates "$SOURCE_CERT" "$SOURCE_KEY" "$domain"
   token=$(openssl rand -hex 32)
-  tmpdir="$ROOT/.settings.new"
-  [[ ! -L "$SETTINGS" && ! -L "$tmpdir" ]] || fail 'Unsafe subscription settings path.'
-  python3 - "$tmpdir" "$domain" "$port" "$name" "$family" "$server" "$token" "$SOURCE_CERT" "$SOURCE_KEY" <<'PY'
+  settings_tmp="$ROOT/.settings.new"
+  [[ ! -L "$SETTINGS" && ! -L "$settings_tmp" ]] || fail 'Unsafe subscription settings path.'
+  python3 - "$settings_tmp" "$domain" "$port" "$name" "$family" "$server" "$token" "$SOURCE_CERT" "$SOURCE_KEY" <<'PY'
 import json,sys
 path,domain,port,name,family,address,token,crt,key=sys.argv[1:]
 doc=dict(domain=domain,listen_port=int(port),node_name=name,bind_family=family,
          snell_address=address,token=token,source_cert=crt,source_key=key)
 with open(path,"w",encoding="utf-8") as f:json.dump(doc,f,indent=2);f.write("\n")
 PY
-  chown root:snellv6 "$tmpdir"
-  chmod 640 "$tmpdir"
-  mv -fT -- "$tmpdir" "$SETTINGS"
+  chown root:snellv6 "$settings_tmp"
+  chmod 640 "$settings_tmp"
+  mv -fT -- "$settings_tmp" "$SETTINGS"
   /usr/bin/python3 -I "$SRC" --check
   cat > "$UNIT" <<'EOF'
 # Managed by pansamrt/singboxSnell subscription
@@ -375,7 +381,8 @@ WantedBy=timers.target
 EOF
   chmod 644 "$UNIT" "$SYNC_UNIT" "$TIMER"
   systemctl daemon-reload
-  systemctl enable --now snell-v6-subscription.service ||
+  systemctl enable snell-v6-subscription.service
+  systemctl restart snell-v6-subscription.service ||
     fail 'Subscription service failed; check journalctl -u snell-v6-subscription.service.'
   systemctl enable --now snell-v6-subscription-cert-sync.timer
   systemctl is-active --quiet snell-v6-subscription.service ||
@@ -395,6 +402,10 @@ disable() {
   fi
   local file
   for file in "$UNIT" "$SYNC_UNIT" "$TIMER"; do ensure_known_unit "$file"; done
+  if systemctl is-active --quiet snell-v6-subscription.service; then
+    [[ "$(systemctl show snell-v6-subscription.service -p FragmentPath --value)" == "$UNIT" ]] ||
+      fail 'Active subscription service has an unexpected systemd unit; refusing to stop it.'
+  fi
   systemctl disable --now snell-v6-subscription-cert-sync.timer 2>/dev/null || true
   systemctl disable --now snell-v6-subscription.service 2>/dev/null || true
   for file in "$UNIT" "$SYNC_UNIT" "$TIMER"; do
