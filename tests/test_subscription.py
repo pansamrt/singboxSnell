@@ -219,6 +219,18 @@ class SubscriptionTest(unittest.TestCase):
         for path in paths:
             self.assertFalse(Path(path).exists(), path)
 
+    def test_terminal_qr_uses_singbox_remote_import_link(self):
+        helper = (Path(__file__).parents[1] /
+                  "snell-v6-subscribe.sh").read_text(encoding="utf-8")
+        show = helper.split("show_links() {\n", 1)[1].split(
+            "\n}\nrotate() {", 1
+        )[0]
+        self.assertIn('deep=${outputs[1]}', show)
+        self.assertIn('qrencode -t ANSIUTF8 "$deep"', show)
+        self.assertNotIn('qrencode -t ANSIUTF8 "$snell_link"', show)
+        self.assertIn('qrencode -o "$QR_IMPORT" -s 6 -m 2 "$deep"', show)
+        self.assertIn('qrencode -o "$QR_PASSWALL" -s 6 -m 2 "$snell_link"', show)
+
     def test_sub_shortcut_displays_links_and_preserves_menu(self):
         root = Path(__file__).parents[1]
         helper = (root / "snell-v6-subscribe.sh").read_text(encoding="utf-8")
