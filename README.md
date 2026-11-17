@@ -62,11 +62,13 @@ The `--install-sn` command installs/updates `/usr/local/bin/sn`, even when stand
 
 The Surge **Snell server remains v6.0.0**. v1.1.0 is the version of the install/management features.
 
-After updating the local sn command using the normal --install-sn procedure, choose **5) HTTPS subscription / QR**. The companion sn-sub helper is downloaded from this public repository only on first use. Direct commands: **sn sub**, **sn sub setup**, **sn sub show**, **sn sub rotate**, **sn sub disable**.
+After updating the local sn command using the normal --install-sn procedure, choose **5) HTTPS subscription / QR**. The companion sn-sub helper is downloaded from this public repository only on first use. Direct commands: **sn sub**, **sn sub setup**, **sn sub show**, **sn sub rotate**, **sn sub disable**, **sn sub update** (refreshes the local helper from this repository).
 
 **Reuse existing ECC:** setup reads Subject Alternative Names from the local ygkkk certificate at /root/ygkkkca/cert.crt (key: /root/ygkkkca/private.key), optional /root/ygkkkca/fullchain.cer, and existing Certbot certificates in /etc/letsencrypt/live. It shows discoverable domain hints, but cannot discover domains that are not visible in this VPS's certificate/configuration files. You must choose or enter the real domain. DNS resolution is checked; no DNS provider settings are modified. It verifies certificate expiry, hostname coverage and the private key pairing without modifying the original certificate files.
 
 **If no matching certificate:** choose ACME issuance via distribution-packaged Certbot. The script requests a Let's Encrypt **ECC P-256** certificate using standalone HTTP-01, requiring correct public DNS, **inbound TCP 80** and **port 80 unoccupied**. It refuses to stop or alter other webservers/proxies just to free that port. If port 80 is used, supply your own valid certificate or arrange a separate DNS-01/webroot challenge. Certbot's renewal service/timer must be working. The new HTTPS server checks the original cert files for renewal twice daily and refreshes its private copy.
+
+To switch the configured HTTPS domain or certificate after setup, first run **sn sub disable**, then **sn sub setup**; the first-time setup intentionally avoids overwriting a live subscription.
 
 **Subscription URL and import QR:** the helper creates a token-protected, read-only HTTPS server on **TCP 8443 by default**; it does not occupy 443, SSH or Snell's data port 17888. Open the selected HTTPS TCP port in the VPS provider's firewall. The URL follows this form:
 
