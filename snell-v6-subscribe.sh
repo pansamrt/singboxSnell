@@ -192,14 +192,15 @@ issue_cert() {
   info 'No existing trusted certificate covers this domain.'
   info 'ACME HTTP-01 requires public DNS pointing here and inbound TCP port 80.'
   python3 - <<'PY'
-import socket
+import errno,socket
 for family,host in ((socket.AF_INET,"0.0.0.0"), (socket.AF_INET6,"::")):
     try:
-        sock=socket.socket(family,socket.SOCK_STREAM)
-        if family==socket.AF_INET6:sock.setsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY,1)
-        sock.bind((host,80))
-        sock.close()
+        with socket.socket(family,socket.SOCK_STREAM) as sock:
+            if family==socket.AF_INET6:sock.setsockopt(socket.IPPROTO_IPV6,socket.IPV6_V6ONLY,1)
+            sock.bind((host,80))
     except OSError as exc:
+        if family==socket.AF_INET6 and exc.errno in (errno.EAFNOSUPPORT,errno.EPROTONOSUPPORT):
+            continue
         raise SystemExit('TCP 80 is unavailable for ACME: '+str(exc))
 PY
   read -r -p 'Issue a Let’s Encrypt ECC certificate using Certbot ACME? [y/N]: ' answer ||
@@ -230,9 +231,9 @@ setup() {
   require_snell
   local domain server name port family answer token tmpdir candidate settings_tmp
   if [[ -f "$SETTINGS" ]]; then
-    read -r -p 'HTTPS subscription exists. Reconfigure and rotate token? [y/N]: ' answer ||
-      fail 'Confirmation required.'
-    [[ "$answer" == y || "$answer" == Y ]] || { info 'Cancelled.'; return 0; }
+    info 'HTTPS subscription already configured. Use sn sub show or sn sub rotate.'
+    info 'To change the domain/certificate, run sn sub disable first, then sn sub setup.'
+    return 0
   fi
   suggest_domains
   read -r -p 'HTTPS subscription domain (DNS name, not IP): ' domain || fail 'Domain required.'
@@ -427,7 +428,7 @@ menu() {
   [[ -t 0 ]] || fail 'Interactive SSH terminal required.'
   while true; do
     printf '\n===== Snell HTTPS Subscription =====\n'
-    printf '  1) Setup / reconfigure HTTPS subscription\n'
+    printf '  1) Setup HTTPS subscription\n'
     printf '  2) Show subscription URL and QR\n'
     printf '  3) Rotate subscription token\n'
     printf '  4) Disable HTTPS subscription (keep Snell)\n'
