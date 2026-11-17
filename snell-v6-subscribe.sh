@@ -299,7 +299,7 @@ PY
     return 1
   fi
   while true; do
-    read -r -p '节点名称 [默认 Snell-v6，可含空格/中文]： ' name ||
+    IFS= read -r -p '节点名称 [默认 Snell-v6，可含空格/中文]： ' name ||
       fail '输入已中断。'
     [[ -n "$name" ]] || name=Snell-v6
     if python3 - "$name" <<'PY'
