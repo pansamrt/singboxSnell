@@ -97,6 +97,40 @@ The HTTPS endpoint returns a complete sing-box remote-profile JSON with the curr
 
 **Lifecycle:** sn sub disable removes only its HTTPS service, settings and generated QR while retaining the original certificates and the Snell server. sn uninstall first disables the managed HTTPS endpoint and then removes only standalone Snell files. The script does not deliberately alter existing ygkkk sing-box, Hysteria2, SSH, provider firewall, DNS or routing. Reinstalling Snell generates new credentials; reconfigure/refresh clients after reinstalling.
 
+## PassWall / iStoreOS 专用 Snell v6 订阅
+
+**区别：** sing-box 图形客户端的导入链接（sing-box://import-remote-profile）以及 HTTPS /config.json 订阅，提供的是 sing-box 完整配置，不能直接用作 PassWall 的节点订阅。
+
+新版提供独立的 **PassWall HTTPS 节点订阅地址**：
+
+~~~text
+https://your-domain.example:8443/s/YOUR_PRIVATE_TOKEN/passwall.txt
+~~~
+
+该地址返回的是 **Base64 编码的 snell:// 节点列表**，而非 JSON。解码后的示例（均为占位信息）：
+
+~~~text
+snell://EXAMPLE_PSK@203.0.113.10:17888?version=6&mode=default#Snell-v6
+~~~
+
+PassWall 上游订阅解析器会把 HTTPS 响应作为 Base64 节点列表解码，再将 snell:// 节点解析为 sing-box 类型，并读取 version=6、PSK、TCP 端口和加密模式。使用当前 Snell 服务配置实时生成该订阅；修改 sn port 后，下次 PassWall 更新订阅时会获得最新端口。HTTPS 8443（示例）是下载订阅的端口，而 Snell 数据连接端口由服务自身配置决定。
+
+**已有 VPS 升级方式（原有 Snell 与订阅不需要重装）：**
+
+~~~bash
+cd /root
+curl -fL https://raw.githubusercontent.com/pansamrt/singboxSnell/main/snell-v6-oneclick.sh -o snell-v6-oneclick.sh
+bash -n snell-v6-oneclick.sh && bash snell-v6-oneclick.sh --install-sn
+sn sub update
+sn sub show
+~~~
+
+sn sub update 会更新本地订阅管理脚本和实际运行的 HTTPS 后端，语法检查通过后仅重启 snell-v6-subscription.service；失败时尝试自动回滚。不会改变 Snell 监听端口、PSK、原始证书和 SSH。sn sub show 会额外显示 **iStoreOS PassWall 专用节点订阅**，并生成 /root/Snell-v6-passwall-qr.png（仅 root 可读取）。
+
+**iStoreOS 设置：** 打开 PassWall → 节点订阅管理 → 添加订阅，在订阅地址栏粘贴 **/passwall.txt 结尾的完整 HTTPS URL**，保存并更新订阅。然后在节点列表检查协议为 sing-box / Snell v6，端口、PSK 和 mode=default 符合预期；在切换实际网关路由前单独测试节点。不要在 PassWall 的订阅 URL 栏直接粘贴 sing-box:// 链接、完整 sing-box JSON 或 snell:// 单节点分享地址。Snell 单节点可以在支持的节点分享链接导入界面中单独导入，但不会自动订阅更新。
+
+**安全：** HTTPS 地址与二维码包含私有访问令牌，不能公开分享。曾经发在聊天、截图或日志中的令牌建议使用 sn sub rotate 轮换，再把新地址更新到 iOS 和 PassWall。轮换不会改变 Snell PSK；旧订阅地址失效。项目不会主动改动 iStoreOS、PassWall、Tailscale、Hysteria2 或既有家庭路由策略。
+
 ## Read-only plan first
 
 For a new Debian 12/13 or Ubuntu 24.04 VPS with systemd:
