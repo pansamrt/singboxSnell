@@ -14,10 +14,13 @@ unit = pathlib.Path("/etc/systemd/system/snell-v6.service")
 binary = pathlib.Path("/opt/snell-v6/snell-server")
 config = pathlib.Path("/etc/snell-v6/snell-server.conf")
 profile = pathlib.Path("/root/CI-Snell-v6-port-test-ios.json")
+manager_cmd = pathlib.Path("/usr/local/bin/sn")
+systemd_runtime = pathlib.Path("/run/systemd/system")
 assert os.geteuid() == 0, "Run under sudo in a disposable CI environment."
-for item in (unit, binary, config, profile):
+for item in (unit, binary, config, profile, manager_cmd):
     assert not item.exists(), f"Refusing to touch existing resource: {item}"
 
+systemd_existed = systemd_runtime.is_dir()
 temp = pathlib.Path(tempfile.mkdtemp(prefix="snell-port-ci-"))
 def new_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -115,6 +118,13 @@ try:
         }]
     }))
     profile.chmod(0o600)
+    systemd_existed = systemd_runtime.is_dir()
+    systemd_runtime.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["bash", str(repo / "snell-v6-oneclick.sh"), "--install-sn"],
+                   check=True, env=env, timeout=15)
+    assert manager_cmd.read_text() == (repo / "sn").read_text()
+    assert manager_cmd.stat().st_mode & 0o111, "sn is not executable"
+    print("PASS: Existing VPS install-sn copies the exact manager without a server change")
     subprocess.run(["systemctl", "restart", "snell-v6.service"],
                    env=env, check=True, timeout=10)
     check_open(old)
@@ -149,6 +159,12 @@ finally:
         try:
             os.kill(int(pidfile.read_text()), 15)
         except (ProcessLookupError, ValueError):
+            pass
+    manager_cmd.unlink(missing_ok=True)
+    if not systemd_existed:
+        try:
+            systemd_runtime.rmdir()
+        except OSError:
             pass
     for p in (profile, config, binary, unit):
         p.unlink(missing_ok=True)
