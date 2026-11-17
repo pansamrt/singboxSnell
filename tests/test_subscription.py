@@ -121,8 +121,65 @@ class SubscriptionTest(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("HTTPS 订阅 TCP 端口 [默认 5555]", helper)
-        self.assertIn('if [[ -z "$port" ]]; then port=5555; fi', helper)
+        self.assertIn('[[ -n "$port" ]] || port=5555', helper)
         self.assertNotIn('if [[ -z "$port" ]]; then port=8443; fi', helper)
+
+    def test_setup_reprompts_invalid_input_and_accepts_spaced_name(self):
+        """Exercise the real setup prompt block without making VPS changes."""
+        import socket
+        helper = (Path(__file__).parents[1] / "snell-v6-subscribe.sh").read_text(
+            encoding="utf-8"
+        )
+        validator = helper.split("validate_domain() {\n", 1)[1].split(
+            "\n}\ncert_ok() {", 1
+        )[0]
+        prompts = helper.split("  suggest_domains\n", 1)[1].split(
+            "  SOURCE_CERT=''\n", 1
+        )[0]
+        bash_script = (
+            "set -Eeuo pipefail\n"
+            "info() { printf '%s\\n' \"$*\"; }\n"
+            "fail() { printf 'FAIL:%s\\n' \"$*\" >&2; exit 1; }\n"
+            "suggest_domains() { :; }\n"
+            "show_dns() { :; }\n"
+            "validate_domain() {\n" + validator + "\n}\n"
+            "run() {\n"
+            " local domain server name port family answer\n"
+            + prompts +
+            " printf 'RESULT:%s|%s|%s|%s|%s\\n' "
+            "\"$domain\" \"$server\" \"$name\" \"$port\" \"$family\"\n"
+            "}\nrun\n"
+        )
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as busy:
+            busy.bind(("127.0.0.1", 0))
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.bind(("127.0.0.1", 0))
+                free_port = probe.getsockname()[1]
+            busy_port = busy.getsockname()[1]
+            answers = (
+                "invalid-domain\nhk.herewego.top\n"
+                "not-an-ip\n38.147.163.62\n"
+                " HK Snell-v6 \nHK Snell-v6\n"
+                "hello\n99999\n"
+                f"{busy_port}\n"
+                "wrong-family\nipv4\n"
+                f"{free_port}\nipv4\n"
+            )
+            result = subprocess.run(
+                ["bash", "-c", bash_script],
+                input=answers, text=True, capture_output=True, timeout=15
+            )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("域名格式错误，请重新输入", result.stdout)
+        self.assertIn("服务器 IP 格式错误，请重新输入", result.stdout)
+        self.assertIn("节点名称格式错误，请重新输入", result.stdout)
+        self.assertIn("端口号无效", result.stdout)
+        self.assertIn("监听模式无效", result.stdout)
+        self.assertIn("HTTPS 监听端口不可用，请重新选择端口", result.stdout)
+        self.assertIn(
+            f"RESULT:hk.herewego.top|38.147.163.62|HK Snell-v6|{free_port}|ipv4",
+            result.stdout
+        )
 
     def test_sub_shortcut_displays_links_and_preserves_menu(self):
         root = Path(__file__).parents[1]
