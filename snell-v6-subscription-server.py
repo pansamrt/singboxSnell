@@ -110,10 +110,15 @@ class TLSHTTPServer(http.server.ThreadingHTTPServer):
     def get_request(self):
         raw, address = super().get_request()
         try:
+            # Bound handshake/read timeouts prevent stalled clients from holding
+            # the single accept loop or a worker thread indefinitely.
+            raw.settimeout(5.0)
             tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             tls.minimum_version = ssl.TLSVersion.TLSv1_2
             tls.load_cert_chain(str(CERT), str(KEY))
-            return tls.wrap_socket(raw, server_side=True), address
+            wrapped = tls.wrap_socket(raw, server_side=True)
+            wrapped.settimeout(10.0)
+            return wrapped, address
         except Exception:
             raw.close()
             raise
