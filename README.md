@@ -58,6 +58,21 @@ The `--install-sn` command installs/updates `/usr/local/bin/sn`, even when stand
 
 **Network and client caveats:** The script never changes host/provider firewalls or security groups. Before switching, ensure the **new TCP port** is permitted by your VPS provider. A newly edited server port will **not** automatically update profiles already imported on your iPhone; re-import the updated `*-ios.json` via Xftp/SFTP or change the client `server_port` manually. Older QR/remote-subscription URLs, if used, require updating their hosted JSON separately. Local TCP reachability is not proof of Snell authentication or internet reachability.
 
+## 简体中文管理界面
+
+当前版本的 `sn` 主菜单、端口管理、安装与卸载提示，以及 `sn sub` 的 HTTPS 订阅/二维码子菜单均显示**简体中文**。命令参数保持原样（例如 `sn status`、`sn install`、`sn uninstall`、`sn sub setup`），卸载确认仍为 **[y/N]**，直接回车默认取消。
+
+已有 VPS 更新主菜单：
+
+```bash
+cd /root
+curl -fL https://raw.githubusercontent.com/pansamrt/singboxSnell/main/snell-v6-oneclick.sh -o snell-v6-oneclick.sh
+bash -n snell-v6-oneclick.sh && bash snell-v6-oneclick.sh --install-sn
+sn
+```
+
+如之前已安装**英文版** `sn-sub`，更新主菜单后还须执行一次 `sn sub update`，才能将 HTTPS 订阅子菜单同步切换为中文。该操作只更新订阅管理脚本，不会修改现有 Snell 端口、PSK、证书或运行中的订阅服务。
+
 ## v1.1.0 — HTTPS subscription, ECC/ACME certificates and QR (sn option 5)
 
 The Surge **Snell server remains v6.0.0**. v1.1.0 is the version of the install/management features.
