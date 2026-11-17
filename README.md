@@ -1,6 +1,10 @@
 # singboxSnell — Surge Snell v6 standalone installer
 
-Snell v6 一键安装地址：https://raw.githubusercontent.com/pansamrt/singboxSnell/main/snell-v6-oneclick.sh
+Snell v6 一键安装地址（点击代码框右上角的复制按钮）：
+
+```text
+https://raw.githubusercontent.com/pansamrt/singboxSnell/main/snell-v6-oneclick.sh
+```
 
 Standalone **Surge official Snell Server v6.0.0** setup and **sing-box 1.14+ iOS** JSON profile generator. Hosted independently from Smart's sing-box installer and service. GPL-3.0-only wrapper script; the downloaded official Snell executable is proprietary and is not committed to this repository.
 
