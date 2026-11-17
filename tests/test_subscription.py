@@ -116,6 +116,63 @@ class SubscriptionTest(unittest.TestCase):
                 thread.join(timeout=5)
 
 
+    def test_manager_direct_snell_share_link(self):
+        """sn sub show must emit a snell:// node, not confuse it with HTTPS."""
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            settings = root / "settings.json"
+            conf = root / "snell.conf"
+            props = {
+                "domain": "test.example", "listen_port": 5555,
+                "token": "a" * 64, "node_name": "Snell-v6",
+                "snell_address": "203.0.113.10",
+            }
+            settings.write_text(json.dumps(props), encoding="utf-8")
+            psk = "example+special@strong/secret"
+            conf.write_text(
+                "[snell-server]\nlisten = 0.0.0.0:17888\n"
+                f"psk = {psk}\nmode = default\n", encoding="utf-8"
+            )
+            manager = (Path(__file__).parents[1] /
+                       "snell-v6-subscribe.sh").read_text(encoding="utf-8")
+            prefix = 'links() {\n  python3 - "$SETTINGS" "$SNELL" <<\'PY\'\n'
+            script = manager.split(prefix, 1)[1].split(
+                '\nPY\n}\nshow_links() {', 1
+            )[0]
+
+            def generate():
+                result = subprocess.run(
+                    ["python3", "-", str(settings), str(conf)],
+                    input=script, text=True, capture_output=True, check=True
+                )
+                return result.stdout.splitlines()
+
+            urls = generate()
+            self.assertEqual(len(urls), 4)
+            self.assertTrue(urls[0].endswith("/config.json"))
+            self.assertTrue(urls[1].startswith("sing-box://"))
+            self.assertTrue(urls[3].endswith("/passwall.txt"))
+            node = urlsplit(urls[2])
+            self.assertEqual(node.scheme, "snell")
+            self.assertEqual(unquote(node.username), psk)
+            self.assertEqual(node.hostname, "203.0.113.10")
+            self.assertEqual(node.port, 17888)
+            self.assertEqual(parse_qs(node.query),
+                             {"version": ["6"], "mode": ["default"]})
+
+            conf.write_text(
+                "[snell-server]\nlisten = 0.0.0.0:25678, [::]:25678\n"
+                f"psk = {psk}\nmode = unshaped\n", encoding="utf-8"
+            )
+            props["snell_address"] = "2001:db8::1"
+            settings.write_text(json.dumps(props), encoding="utf-8")
+            urls = generate()
+            node = urlsplit(urls[2])
+            self.assertEqual(node.hostname, "2001:db8::1")
+            self.assertEqual(node.port, 25678)
+            self.assertEqual(unquote(node.username), psk)
+            self.assertEqual(parse_qs(node.query)["mode"], ["unshaped"])
+
     def test_passwall_ipv6_authority(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
