@@ -125,6 +125,45 @@ try:
     assert manager_cmd.read_text() == (repo / "sn").read_text()
     assert manager_cmd.stat().st_mode & 0o111, "sn is not executable"
     print("PASS: Existing VPS install-sn copies the exact manager without a server change")
+    # The JSON viewer must not expose the PSK unless the operator explicitly confirms.
+    masked = subprocess.run(["bash", str(repo / "sn"), "json"],
+                            env=env, text=True, capture_output=True, timeout=10)
+    assert masked.returncode == 0, masked.stdout + masked.stderr
+    assert '"psk": "[已隐藏]"' in masked.stdout, masked.stdout
+    assert psk not in masked.stdout, "Masked JSON viewer leaked PSK"
+    assert '"server_port":' in masked.stdout, masked.stdout
+    print("PASS: sn json displays valid Snell v6 profile with PSK redacted")
+
+    # The interactive confirmation is the only path that reveals a full key.
+    revealed = subprocess.run(
+        ["script", "-q", "-e", "-c", f"bash {repo / 'sn'} json", "/dev/null"],
+        input="SHOW\n", text=True, capture_output=True, env=env, timeout=15)
+    assert revealed.returncode == 0, revealed.stdout + revealed.stderr
+    assert psk in revealed.stdout, "Explicit SHOW must display original JSON"
+    print("PASS: Full private JSON requires an explicit SHOW confirmation")
+
+    # A matching symlink must never become a viewer candidate.
+    symlink = pathlib.Path("/root/CI-ViewerLink-ios.json")
+    assert not symlink.exists() and not symlink.is_symlink(), "Unsafe CI symlink path"
+    symlink.symlink_to(profile)
+    try:
+        linked = subprocess.run(["bash", str(repo / "sn"), "json"],
+                                env=env, text=True, capture_output=True, timeout=10)
+        assert linked.returncode == 0, linked.stdout + linked.stderr
+        assert "CI-ViewerLink-ios.json" not in linked.stdout, linked.stdout
+        assert psk not in linked.stdout, "Symlink test leaked PSK"
+    finally:
+        symlink.unlink()
+    print("PASS: JSON viewer ignores symlinks and does not expose PSK")
+
+    menu = subprocess.run(
+        ["script", "-q", "-e", "-c", f"bash {repo / 'sn'}", "/dev/null"],
+        input="6\nNO\n0\n", text=True, capture_output=True, env=env, timeout=15)
+    assert menu.returncode == 0, menu.stdout + menu.stderr
+    assert "6) 查看 sing-box JSON 配置" in menu.stdout, menu.stdout
+    assert psk not in menu.stdout, "Menu viewer leaked PSK"
+    print("PASS: Main menu option 6 displays masked JSON and returns safely")
+
     subprocess.run(["systemctl", "restart", "snell-v6.service"],
                    env=env, check=True, timeout=10)
     check_open(old)
