@@ -71,13 +71,13 @@ bash -n snell-v6-oneclick.sh && bash snell-v6-oneclick.sh --install-sn
 sn
 ```
 
-如之前已安装**英文版** `sn-sub`，更新主菜单后还须执行一次 `sn sub update`，才能将 HTTPS 订阅子菜单同步切换为中文。该操作只更新订阅管理脚本，不会修改现有 Snell 端口、PSK、证书或运行中的订阅服务。
+已有 VPS 更新主菜单后执行 `sn sub update` 以同步最新订阅管理组件。此后直接运行 `sn sub` 即显示订阅地址、Snell 分享链接及二维码；需要修改配置或轮换令牌时使用 `sn sub menu`，或从 `sn` 主菜单选择 `5`。更新操作不改变现有 Snell 端口、PSK 和证书。
 
 ## v1.1.0 — HTTPS subscription, ECC/ACME certificates and QR (sn option 5)
 
 The Surge **Snell server remains v6.0.0**. v1.1.0 is the version of the install/management features.
 
-After updating the local sn command using the normal --install-sn procedure, choose **5) HTTPS subscription / QR**. The companion sn-sub helper is downloaded from this public repository only on first use. Direct commands: **sn sub**, **sn sub setup**, **sn sub show**, **sn sub rotate**, **sn sub disable**, **sn sub update** (refreshes the local helper from this repository).
+After updating the local sn command using the normal --install-sn procedure, choose **5) HTTPS subscription / QR**. The companion sn-sub helper is downloaded from this public repository only on first use. Direct commands: **sn sub** (show URLs and QRs directly), **sn sub menu** (open the subscription management menu), **sn sub** (legacy-compatible alias), **sn sub setup**, **sn sub rotate**, **sn sub disable**, **sn sub update** (refreshes the local helper from this repository). Main-menu option 5 still opens the management menu.
 
 **Reuse existing ECC:** setup reads Subject Alternative Names from the local ygkkk certificate at /root/ygkkkca/cert.crt (key: /root/ygkkkca/private.key), optional /root/ygkkkca/fullchain.cer, and existing Certbot certificates in /etc/letsencrypt/live. It shows discoverable domain hints, but cannot discover domains that are not visible in this VPS's certificate/configuration files. You must choose or enter the real domain. DNS resolution is checked; no DNS provider settings are modified. It verifies certificate expiry, hostname coverage and the private key pairing without modifying the original certificate files.
 
@@ -101,7 +101,7 @@ The HTTPS endpoint returns a complete sing-box remote-profile JSON with the curr
 
 **区别：** sing-box 图形客户端的 `sing-box://import-remote-profile` 链接、HTTPS `/config.json` 配置订阅、`snell://` 节点分享链接，以及 HTTPS `/passwall.txt` 自动节点订阅是不同格式。
 
-执行 `sn sub show`，第三项会直接显示 **iStoreOS PassWall 节点分享链接（snell://）**，其二维码位于 `/root/Snell-v6-passwall-qr.png`。这个链接自动读取当前服务器 Snell PSK、实际监听端口及 mode，因此适合在 **PassWall → 节点列表 → 导入分享URL** 中导入；**不能**填入「节点订阅」的 HTTPS URL 输入框。示例：
+执行 `sn sub`，第三项会直接显示 **iStoreOS PassWall 节点分享链接（snell://）**，其二维码位于 `/root/Snell-v6-passwall-qr.png`。这个链接自动读取当前服务器 Snell PSK、实际监听端口及 mode，因此适合在 **PassWall → 节点列表 → 导入分享URL** 中导入；**不能**填入「节点订阅」的 HTTPS URL 输入框。示例：
 
 ~~~text
 snell://EXAMPLE_PSK@203.0.113.10:17888?version=6&mode=default#Snell-v6
@@ -124,12 +124,12 @@ cd /root
 curl -fL https://raw.githubusercontent.com/pansamrt/singboxSnell/main/snell-v6-oneclick.sh -o snell-v6-oneclick.sh
 bash -n snell-v6-oneclick.sh && bash snell-v6-oneclick.sh --install-sn
 sn sub update
-sn sub show
+sn sub
 ~~~
 
-sn sub update 会更新本地订阅管理脚本和实际运行的 HTTPS 后端，语法检查通过后仅重启 snell-v6-subscription.service；失败时尝试自动回滚。不会改变 Snell 监听端口、PSK、原始证书和 SSH。sn sub show 会显示 **iStoreOS PassWall 节点分享链接（snell://）**，同时保留 HTTPS 自动订阅 URL；/root/Snell-v6-passwall-qr.png 对应 snell:// 分享链接，仅 root 可读取。
+sn sub update 会更新本地订阅管理脚本和实际运行的 HTTPS 后端，语法检查通过后仅重启 snell-v6-subscription.service；失败时尝试自动回滚。不会改变 Snell 监听端口、PSK、原始证书和 SSH。sn sub 会显示 **iStoreOS PassWall 节点分享链接（snell://）**，同时保留 HTTPS 自动订阅 URL；/root/Snell-v6-passwall-qr.png 对应 snell:// 分享链接，仅 root 可读取。
 
-**iStoreOS 设置：** 推荐进入 PassWall → 节点列表 → 导入分享URL，粘贴 `sn sub show` 显示的 **snell://** 完整链接，检查节点类型为 sing-box / Snell，版本为 6，端口为服务器的真实 Snell 端口，然后单独测试连接。只有在需要自动节点订阅更新时，才使用 PassWall → 节点订阅管理添加 HTTPS `/passwall.txt` URL。不要把 `snell://` 分享链接误填在 HTTPS 订阅 URL 栏中，也不要把 HTTPS 订阅 URL 当成 HTTP 代理节点。
+**iStoreOS 设置：** 推荐进入 PassWall → 节点列表 → 导入分享URL，粘贴 `sn sub` 显示的 **snell://** 完整链接，检查节点类型为 sing-box / Snell，版本为 6，端口为服务器的真实 Snell 端口，然后单独测试连接。只有在需要自动节点订阅更新时，才使用 PassWall → 节点订阅管理添加 HTTPS `/passwall.txt` URL。不要把 `snell://` 分享链接误填在 HTTPS 订阅 URL 栏中，也不要把 HTTPS 订阅 URL 当成 HTTP 代理节点。
 
 **安全：** HTTPS 地址与二维码包含私有访问令牌，不能公开分享。曾经发在聊天、截图或日志中的令牌建议使用 sn sub rotate 轮换，再把新地址更新到 iOS 和 PassWall。轮换不会改变 Snell PSK；旧订阅地址失效。项目不会主动改动 iStoreOS、PassWall、Tailscale、Hysteria2 或既有家庭路由策略。
 
