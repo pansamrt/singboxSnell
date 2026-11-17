@@ -116,8 +116,17 @@ class SubscriptionTest(unittest.TestCase):
                 thread.join(timeout=5)
 
 
+    def test_sub_shortcut_displays_links_and_preserves_menu(self):
+        root = Path(__file__).parents[1]
+        helper = (root / "snell-v6-subscribe.sh").read_text(encoding="utf-8")
+        manager = (root / "sn").read_text(encoding="utf-8")
+        self.assertIn('  "") show_links ;;', helper)
+        self.assertIn('  show) show_links ;;', helper)
+        self.assertIn('  menu) menu ;;', helper)
+        self.assertIn('          5) subscription_menu menu ;;', manager)
+
     def test_manager_direct_snell_share_link(self):
-        """sn sub show must emit a snell:// node, not confuse it with HTTPS."""
+        """sn sub must emit a snell:// node, not confuse it with HTTPS."""
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             settings = root / "settings.json"
