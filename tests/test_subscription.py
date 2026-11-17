@@ -116,6 +116,49 @@ class SubscriptionTest(unittest.TestCase):
                 thread.join(timeout=5)
 
 
+    def test_core_dependencies_and_existing_install_preflight(self):
+        root = Path(__file__).parents[1]
+        installer = (root / "snell-v6-oneclick.sh").read_text(encoding="utf-8")
+        self.assertIn("util-linux passwd coreutils libc-bin", installer)
+        self.assertIn(
+            "check_dependency_commands curl unzip openssl python3 flock useradd userdel",
+            installer,
+        )
+        self.assertIn(
+            "check_dependency_commands python3 curl openssl flock getent stat mktemp",
+            installer,
+        )
+        self.assertIn(
+            "Detected existing independent Snell installation; skipping apt",
+            installer,
+        )
+        self.assertIn("check_dependency_commands mktemp grep stat", installer)
+        # Run the exact command-check helper in a controlled subprocess.
+        helper = installer.split("check_dependency_commands() {\n", 1)[1].split(
+            "\n}\n", 1
+        )[0]
+        script = (
+            "set -Eeuo pipefail\n"
+            "fail() { printf 'ERROR:%s\\n' \"$*\" >&2; exit 1; }\n"
+            "check_dependency_commands() {\n" + helper + "\n}\n"
+            "check_dependency_commands bash nonexistent_snell_dependency_123\n"
+        )
+        result = subprocess.run(
+            ["bash", "-c", script], text=True, capture_output=True, timeout=5
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("nonexistent_snell_dependency_123", result.stderr)
+        self.assertIn("no automatic apt changes", result.stderr)
+
+    def test_subscription_dependency_checks_and_optional_qr(self):
+        helper = (Path(__file__).parents[1] /
+                  "snell-v6-subscribe.sh").read_text(encoding="utf-8")
+        self.assertIn("check_sub_dependencies python3 openssl curl flock", helper)
+        self.assertIn("command -v apt-get >/dev/null 2>&1", helper)
+        self.assertIn("DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends qrencode", helper)
+        self.assertIn("订阅地址仍可复制使用", helper)
+        self.assertIn("command -v certbot >/dev/null 2>&1", helper)
+
     def test_setup_default_https_port_is_5555(self):
         helper = (Path(__file__).parents[1] / "snell-v6-subscribe.sh").read_text(
             encoding="utf-8"
