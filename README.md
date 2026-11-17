@@ -10,18 +10,37 @@ Standalone **Surge official Snell Server v6.0.0** setup and **sing-box 1.14+ iOS
 
 Entry point: [`snell-v6-oneclick.sh`](snell-v6-oneclick.sh).
 
-## Retrieve safely
+## 一键安装 Snell v6（新 VPS）
 
-Use HTTPS from this public repository; do not pipe a remote installer straight to a root shell:
+适用于 **Debian 12/13、Ubuntu 24.04**（root 终端）。以下两种方式均运行本仓库 `main` 分支的同一个 `snell-v6-oneclick.sh`，**不是两个不同的安装程序**。直接把 `https://...` 地址粘贴进 Linux Shell 并不能安装，必须下载并使用 Bash 执行。
+
+### 方式一：下载、检查、安装（推荐）
+
+先保存脚本到 VPS，检查 Bash 语法，再运行；方便查看文件、保留安装脚本与排查失败原因。
 
 ```bash
 cd /root
-curl --proto '=https' --tlsv1.2 -fL \
-  https://raw.githubusercontent.com/pansamrt/singboxSnell/main/snell-v6-oneclick.sh \
-  -o snell-v6-oneclick.sh
-bash -n snell-v6-oneclick.sh
-bash snell-v6-oneclick.sh --help
+
+curl -fL \
+https://raw.githubusercontent.com/pansamrt/singboxSnell/main/snell-v6-oneclick.sh \
+-o snell-v6-oneclick.sh
+
+bash -n snell-v6-oneclick.sh &&
+bash snell-v6-oneclick.sh
 ```
+
+说明：`bash -n` 仅检查语法，不代表脚本已完成安全审计。首次运行时按提示输入 VPS 公网 IP；脚本会处理新安装所需的软件包、端口检测及 Snell 服务创建。想先查看参数，可运行 `bash snell-v6-oneclick.sh --help`。
+
+### 方式二：真正的一行安装命令
+
+将 GitHub 脚本经 HTTPS 下载后直接交给 Bash 执行，不在本地保存脚本文件：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/pansamrt/singboxSnell/main/snell-v6-oneclick.sh)
+```
+
+**注意：** 这种快捷方式没有先审阅或单独验证脚本。它依赖 Bash 的进程替换功能，且在下载失败时不如方式一容易排查；仅在信任该仓库内容时使用。**建议新 VPS 优先使用方式一。** 两种方式均不会主动修改 SSH、已有其他代理、主机防火墙或路由。
+
 
 ## Manage Snell with `sn` — port, status, install and uninstall
 
