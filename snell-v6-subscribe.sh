@@ -203,7 +203,7 @@ for family,host in ((socket.AF_INET,"0.0.0.0"), (socket.AF_INET6,"::")):
             continue
         raise SystemExit('TCP 80 无法用于 ACME 验证： '+str(exc))
 PY
-  read -r -p '使用 Certbot ACME 申请 Let's Encrypt ECC 证书？[y/N]： ' answer ||
+  read -r -p '使用 Certbot ACME 申请 Let’s Encrypt ECC 证书？[y/N]： ' answer ||
     fail '需要确认后才能继续。'
   [[ "$answer" == y || "$answer" == Y ]] || fail '证书申请已取消。'
   if ! command -v certbot >/dev/null 2>&1; then
