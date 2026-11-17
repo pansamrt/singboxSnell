@@ -444,7 +444,10 @@ subscription_menu() (
     mv -T -- "$temp" "$dest"
     info '已安装或更新 HTTPS 订阅管理器：/usr/local/bin/sn-sub。'
   fi
-  if (( refresh )); then return 0; fi
+  if (( refresh )); then
+    "$dest" upgrade
+    return
+  fi
   "$dest" "$@"
 )
 main() {
