@@ -1,0 +1,22 @@
+name: Snell installer and subscription syntax
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Bash syntax
+        run: |
+          bash -n snell-v6-oneclick.sh
+          bash -n snell-v6-subscribe.sh
+      - name: Validate Python syntax
+        run: python3 -m py_compile snell-v6-subscription-server.py
+      - name: Ensure manager embeds expected subcommands
+        run: |
+          grep -Fq 'sn sub' snell-v6-oneclick.sh
+          grep -Fq 'sync-certs' snell-v6-subscribe.sh
+          grep -Fq 'GET' /dev/null || true
