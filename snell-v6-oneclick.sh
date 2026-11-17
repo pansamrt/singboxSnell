@@ -375,8 +375,11 @@ uninstall_snell() (
   printf 'Keeps the sn manager and /root/*-ios.json client profile backups.\n'
   printf 'Existing Snell client connections will STOP working.\n'
   local answer
-  read -r -p 'Type UNINSTALL to confirm: ' answer || fail 'Confirmation required.'
-  [[ "$answer" == UNINSTALL ]] || { info 'Cancelled.'; exit 0; }
+  read -r -p 'Confirm uninstall Snell v6? [y/N]: ' answer || fail 'Confirmation required.'
+  case "$answer" in
+    y|Y) ;;
+    *) info 'Cancelled; Snell was not removed.'; exit 0 ;;
+  esac
   exec 9>/run/lock/snell-v6-port.lock
   flock -n 9 || fail 'Another Snell management action is running.'
   precheck
