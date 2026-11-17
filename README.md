@@ -49,8 +49,19 @@ On a VPS installed with this version, run as root:
 sn
 ```
 
-Menu choices: `1` to change the TCP listen port, `2` to show current status and port, `3` to install Snell, `4` to uninstall Snell, or `0` to exit. Direct commands: `sn port`, `sn status`, `sn install`, `sn uninstall`. Enter a new unprivileged TCP port **1024–65535** and type `YES` when prompted. The manager verifies the port is free, edits **only** the Snell `listen` setting, restarts **only** `snell-v6.service`, tests its local TCP listener, and automatically restores the previous config and restarts the old service if the new listener fails. It preserves the existing PSK, user, Snell binary and encryption settings. It updates only private root-owned `/root/*-ios.json` profiles matching the local Snell PSK and old port.
+Menu choices: `1` to change the TCP listen port, `2` to show current status and port, `3` to install Snell, `4` to uninstall Snell, `5` for HTTPS subscription and QR, `6` to view the masked sing-box iOS JSON profile, or `0` to exit. Direct commands: `sn port`, `sn status`, `sn install`, `sn uninstall`. Enter a new unprivileged TCP port **1024–65535** and type `YES` when prompted. The manager verifies the port is free, edits **only** the Snell `listen` setting, restarts **only** `snell-v6.service`, tests its local TCP listener, and automatically restores the previous config and restarts the old service if the new listener fails. It preserves the existing PSK, user, Snell binary and encryption settings. It updates only private root-owned `/root/*-ios.json` profiles matching the local Snell PSK and old port.
 
+### 查看 sing-box iOS JSON 客户端配置
+
+运行 `sn` 并选择 **6) 查看 sing-box JSON 配置**，或直接使用：
+
+```bash
+sn json
+```
+
+脚本会寻找本安装器生成的 **`/root/*-ios.json`** 私有配置文件（例如 `/root/Snell-v6-ios.json`），有多个文件时允许选择；默认美化显示 JSON，并将 **PSK 等认证凭据替换为 `[已隐藏]`**。如果在交互式 SSH 终端中确实需要看到完整原文，必须额外输入大写 `SHOW` 确认。不要截图或公开完整内容。
+
+出于安全考虑，只显示 root 所有、权限不对其他用户开放、非软链接且确认为 Snell v6 客户端配置的文件。此功能**仅查看，不修改配置**，也不会影响 Snell 服务、订阅或代理。若你所指的 `singbox.json` 是另一个自定义路径，需要先确认实际文件位置；本功能默认只针对安装器生成的 `*-ios.json` 文件。
 ### Install and uninstall from the menu
 
 Run `sn` and choose **3** to install. The manager asks for the VPS public IP, node name (default `Snell-v6`), TCP port (default **17888**), and listener family (`ipv4`, `ipv6`, or `dual`). After typing `INSTALL`, it downloads the current official project installer from this repository over HTTPS, checks Bash syntax, and invokes the existing standalone Snell v6 installer. If Snell is already installed, installation is refused rather than overwriting the current binary, PSK, or service. If a private local client JSON has the same name, replacement requires a separate `YES` confirmation. Permit the selected TCP port in your provider firewall and update/import the generated private iOS client profile.
