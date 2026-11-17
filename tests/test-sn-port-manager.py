@@ -133,7 +133,7 @@ try:
         occupied.bind(("0.0.0.0", conflict))
         occupied.listen()
         rc, output = run_cli(conflict)
-        assert rc != 0 and "not available" in output, output
+        assert rc != 0 and "不可用" in output, output
         assert listen_port() == old
         check_open(old)
     print("PASS: Conflicting TCP port rejected; old listener unaffected")
