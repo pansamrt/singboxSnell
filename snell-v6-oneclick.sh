@@ -47,7 +47,7 @@ A partially present installation is refused rather than overwritten.
 
 --plan             Read-only inspection (no apt, download, or changes)
 --replace-client   Allow atomic replacement of an existing root-only client JSON
---install-sn       Install/update only local sn management command on an existing VPS
+--install-sn       Install/update sn manager (also works before Snell installation)
 --family           New installations only; default ipv4, optional ipv6/dual
 --port             New installations only; default 17888
 EOF
@@ -82,8 +82,17 @@ Snell v6 standalone manager:
   sn              Interactive menu
   sn status       Show status and current TCP port
   sn port         Change TCP port with interactive prompt and rollback
+  sn install      Install standalone Snell v6 (guided)
+  sn uninstall    Remove standalone Snell v6, keep sn command
   sn --help       Display this help
 EOF
+}
+installation_state() {
+  local n=0 path
+  for path in "$BIN" "$CONF" "$UNIT"; do
+    if [[ -e "$path" || -L "$path" ]]; then n=$((n+1)); fi
+  done
+  case "$n" in 0) echo absent;; 3) echo present;; *) echo partial;; esac
 }
 precheck() {
   [[ $EUID -eq 0 ]] || fail 'Run as root (sudo sn).'
@@ -117,6 +126,10 @@ print(ports.pop())
 PY
 }
 show_status() {
+  case "$(installation_state)" in
+    absent) info 'Snell not installed. Run sn install.'; return 0 ;;
+    partial) fail 'Partial Snell installation; inspect manually.' ;;
+  esac
   precheck
   local old
   old=$(current_port)
@@ -291,20 +304,120 @@ PY
   info 'Re-import the updated JSON on iOS sing-box or change its server_port manually.'
   info 'No SSH, firewall, other proxies, routing or PSK were modified.'
 )
+install_snell() (
+  [[ $EUID -eq 0 ]] || fail 'Run as root.'
+  [[ -t 0 ]] || fail 'Interactive SSH terminal required.'
+  case "$(installation_state)" in
+    present) precheck; info 'Snell already installed. Use sn status.'; exit 0 ;;
+    partial) fail 'Partial installation; will not overwrite.' ;;
+  esac
+  command -v curl >/dev/null || fail 'curl required.'
+  command -v flock >/dev/null || fail 'flock required.'
+  local server name port family answer tmpdir
+  local -a extra_args=()
+  printf '\n===== Install Snell v6 =====\n'
+  read -r -p 'Public VPS IPv4/IPv6: ' server || fail 'IP required.'
+  [[ -n "$server" ]] || fail 'IP required.'
+  read -r -p 'Node name [Snell-v6]: ' name || fail 'Name required.'
+  if [[ -z "$name" ]]; then name=Snell-v6; fi
+  [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,49}$ ]] || fail 'Invalid node name.'
+  read -r -p 'TCP port [17888]: ' port || fail 'Port required.'
+  if [[ -z "$port" ]]; then port=17888; fi
+  [[ "$port" =~ ^[0-9]{1,5}$ ]] || fail 'Invalid TCP port.'
+  port=$((10#$port))
+  ((port >= 1024 && port <= 65535)) || fail 'Port must be 1024-65535.'
+  family=ipv4
+  if [[ "$server" == *:* ]]; then family=ipv6; fi
+  read -r -p "Listener family [ipv4/ipv6/dual] (default $family): " answer || fail 'Family required.'
+  if [[ -n "$answer" ]]; then family=$answer; fi
+  case "$family" in ipv4|ipv6|dual) ;; *) fail 'Invalid listener family.' ;; esac
+  if [[ -e "/root/$name-ios.json" || -L "/root/$name-ios.json" ]]; then
+    read -r -p 'Existing private iOS profile will be REPLACED. Type YES: ' answer || fail 'Confirmation required.'
+    [[ "$answer" == YES ]] || { info 'Cancelled; existing profile retained.'; exit 0; }
+    extra_args+=(--replace-client)
+  fi
+  printf 'Install Snell v6, TCP %s, %s listener, node %s.\n' "$port" "$family" "$name"
+  read -r -p 'Type INSTALL to continue: ' answer || fail 'Confirmation required.'
+  [[ "$answer" == INSTALL ]] || { info 'Cancelled.'; exit 0; }
+  exec 9>/run/lock/snell-v6-port.lock
+  flock -n 9 || fail 'Another Snell management action is running.'
+  [[ "$(installation_state)" == absent ]] || fail 'Snell paths changed; abort.'
+  tmpdir=$(mktemp -d /tmp/sn-install.XXXXXXXX)
+  trap 'rm -rf -- "$tmpdir"' EXIT
+  curl --proto '=https' --tlsv1.2 -fL --retry 2 --connect-timeout 15 --max-time 120 \
+    https://raw.githubusercontent.com/pansamrt/singboxSnell/main/snell-v6-oneclick.sh \
+    -o "$tmpdir/snell-v6-oneclick.sh" || fail 'Download failed.'
+  bash -n "$tmpdir/snell-v6-oneclick.sh" || fail 'Invalid downloaded script.'
+  bash "$tmpdir/snell-v6-oneclick.sh" --server "$server" --name "$name" \
+    --port "$port" --family "$family" "${extra_args[@]}"
+  info 'Snell installation completed; update/import your iOS client profile.'
+)
+uninstall_snell() (
+  [[ $EUID -eq 0 ]] || fail 'Run as root.'
+  [[ -t 0 ]] || fail 'Interactive SSH terminal required.'
+  case "$(installation_state)" in
+    absent) info 'Snell not installed; sn manager is still available.'; exit 0 ;;
+    partial) fail 'Partial installation; will not delete unknown files.' ;;
+  esac
+  precheck
+  [[ "$(systemctl show snell-v6.service -p FragmentPath --value)" == "$UNIT" ]] ||
+    fail 'Unexpected loaded service unit.'
+  [[ -z "$(systemctl show snell-v6.service -p DropInPaths --value)" ]] ||
+    fail 'Custom systemd service drop-ins detected; inspect first.'
+  grep -Fxq 'User=snellv6' "$UNIT" && grep -Fxq 'Group=snellv6' "$UNIT" ||
+    fail 'Unexpected service user/group.'
+  [[ -z "$(find /opt/snell-v6 -mindepth 1 -maxdepth 1 ! -name snell-server -print -quit)" ]] ||
+    fail 'Unexpected files inside /opt/snell-v6; inspect first.'
+  [[ -z "$(find /etc/snell-v6 -mindepth 1 -maxdepth 1 ! -name snell-server.conf -print -quit)" ]] ||
+    fail 'Unexpected files inside /etc/snell-v6; inspect first.'
+  printf '\n===== Uninstall Snell v6 =====\n'
+  printf 'Will stop and delete ONLY snell-v6.service, Snell executable and config.\n'
+  printf 'Keeps the sn manager and /root/*-ios.json client profile backups.\n'
+  printf 'Existing Snell client connections will STOP working.\n'
+  local answer
+  read -r -p 'Type UNINSTALL to confirm: ' answer || fail 'Confirmation required.'
+  [[ "$answer" == UNINSTALL ]] || { info 'Cancelled.'; exit 0; }
+  exec 9>/run/lock/snell-v6-port.lock
+  flock -n 9 || fail 'Another Snell management action is running.'
+  precheck
+  systemctl disable --now snell-v6.service || fail 'Failed to stop Snell; files retained.'
+  if systemctl is-active --quiet snell-v6.service; then fail 'Snell still running; files retained.'; fi
+  rm -f -- "$UNIT"
+  systemctl daemon-reload
+  rm -f -- "$BIN" "$CONF"
+  rmdir -- /opt/snell-v6 /etc/snell-v6 || fail 'Snell files removed; inspect remaining directories.'
+  if getent passwd snellv6 >/dev/null 2>&1; then
+    if [[ "$(getent passwd snellv6 | cut -d: -f6,7)" == /nonexistent:/usr/sbin/nologin ]]; then
+      userdel snellv6 || fail 'Snell removed but service account cleanup failed.'
+    else
+      info 'WARNING: customized snellv6 user retained; inspect before reinstalling.'
+    fi
+  fi
+  if getent group snellv6 >/dev/null 2>&1; then
+    groupdel snellv6 || fail 'Snell removed but dedicated group cleanup failed.'
+  fi
+  info 'SUCCESS: Snell service removed. sn and private iOS JSON files retained.'
+  info 'Run sn install to reinstall; new PSK requires updating your clients.'
+  info 'SSH, Hysteria2, other proxies, firewall and routing were unchanged.'
+)
 main() {
   case "$*" in
     --help|-h|help) usage ;;
     status) show_status ;;
     port) change_port ;;
+    install) install_snell ;;
+    uninstall) uninstall_snell ;;
     "")
       [[ -t 0 ]] || fail 'Interactive menu requires an SSH terminal.'
       while true; do
         printf '\n===== Snell v6 Manager =====\n'
-        printf '  1) Change TCP port\n  2) Show status\n  0) Exit\n'
-        read -r -p 'Choose [0-2]: ' choice || exit 0
+        printf '  1) Change TCP port\n  2) Show status\n  3) Install Snell v6\n  4) Uninstall Snell v6\n  0) Exit\n'
+        read -r -p 'Choose [0-4]: ' choice || exit 0
         case "$choice" in
           1) change_port ;;
           2) show_status ;;
+          3) install_snell ;;
+          4) uninstall_snell ;;
           0) exit 0 ;;
           *) info 'Invalid selection.' ;;
         esac
@@ -393,11 +506,21 @@ PORT=$((10#$PORT))
 case "$FAMILY" in ipv4|ipv6|dual) ;; *) fail 'Use --family ipv4|ipv6|dual.' ;; esac
 
 if (( INSTALL_SN_ONLY )); then
-  [[ -f "$BIN" && -f "$CONF" && -f "$UNIT" && ! -L "$BIN" && ! -L "$CONF" && ! -L "$UNIT" ]] ||
-    fail 'Complete independent Snell v6 installation required before installing sn manager.'
-  grep -Fxq 'ExecStart=/opt/snell-v6/snell-server -c /etc/snell-v6/snell-server.conf' "$UNIT" ||
-    fail 'Unexpected systemd unit; refusing manager install.'
+  count=0
+  for path in "$BIN" "$CONF" "$UNIT"; do
+    if [[ -e "$path" || -L "$path" ]]; then count=$((count+1)); fi
+  done
+  if (( count == 3 )); then
+    [[ -f "$BIN" && -f "$CONF" && -f "$UNIT" && ! -L "$BIN" && ! -L "$CONF" && ! -L "$UNIT" ]] ||
+      fail 'Unsafe existing Snell installation.'
+    grep -Fxq 'ExecStart=/opt/snell-v6/snell-server -c /etc/snell-v6/snell-server.conf' "$UNIT" ||
+      fail 'Unexpected Snell service unit.'
+  elif (( count > 0 )); then
+    fail 'Partial Snell installation; refusing sn manager setup.'
+  fi
   install_sn_command
+  [[ -x /usr/local/bin/sn ]] && grep -Fxq '# SNELL_V6_MANAGER=1' /usr/local/bin/sn ||
+    fail 'sn manager was not installed (possibly conflicting command).'
   exit 0
 fi
 
