@@ -286,8 +286,8 @@ PY
   read -r -p '节点名称 [默认 Snell-v6]： ' name || fail '必须填写节点名称。'
   if [[ -z "$name" ]]; then name=Snell-v6; fi
   [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,49}$ ]] || fail '节点名称格式错误。'
-  read -r -p 'HTTPS 订阅 TCP 端口 [默认 8443]： ' port || fail '必须输入端口。'
-  if [[ -z "$port" ]]; then port=8443; fi
+  read -r -p 'HTTPS 订阅 TCP 端口 [默认 5555]： ' port || fail '必须输入端口。'
+  if [[ -z "$port" ]]; then port=5555; fi
   [[ "$port" =~ ^[0-9]{1,5}$ ]] || fail '端口号无效。'
   port=$((10#$port))
   (( port >= 1024 && port <= 65535 )) || fail '请使用 1024-65535 范围内的 HTTPS 端口。'
