@@ -58,6 +58,28 @@ The `--install-sn` command installs/updates `/usr/local/bin/sn`, even when stand
 
 **Network and client caveats:** The script never changes host/provider firewalls or security groups. Before switching, ensure the **new TCP port** is permitted by your VPS provider. A newly edited server port will **not** automatically update profiles already imported on your iPhone; re-import the updated `*-ios.json` via Xftp/SFTP or change the client `server_port` manually. Older QR/remote-subscription URLs, if used, require updating their hosted JSON separately. Local TCP reachability is not proof of Snell authentication or internet reachability.
 
+## v1.1.0 — HTTPS subscription, ECC/ACME certificates and QR (sn option 5)
+
+The Surge **Snell server remains v6.0.0**. v1.1.0 is the version of the install/management features.
+
+After updating the local sn command using the normal --install-sn procedure, choose **5) HTTPS subscription / QR**. The companion sn-sub helper is downloaded from this public repository only on first use. Direct commands: **sn sub**, **sn sub setup**, **sn sub show**, **sn sub rotate**, **sn sub disable**.
+
+**Reuse existing ECC:** setup reads Subject Alternative Names from the local ygkkk certificate at /root/ygkkkca/cert.crt (key: /root/ygkkkca/private.key), optional /root/ygkkkca/fullchain.cer, and existing Certbot certificates in /etc/letsencrypt/live. It shows discoverable domain hints, but cannot discover domains that are not visible in this VPS's certificate/configuration files. You must choose or enter the real domain. DNS resolution is checked; no DNS provider settings are modified. It verifies certificate expiry, hostname coverage and the private key pairing without modifying the original certificate files.
+
+**If no matching certificate:** choose ACME issuance via distribution-packaged Certbot. The script requests a Let's Encrypt **ECC P-256** certificate using standalone HTTP-01, requiring correct public DNS, **inbound TCP 80** and **port 80 unoccupied**. It refuses to stop or alter other webservers/proxies just to free that port. If port 80 is used, supply your own valid certificate or arrange a separate DNS-01/webroot challenge. Certbot's renewal service/timer must be working. The new HTTPS server checks the original cert files for renewal twice daily and refreshes its private copy.
+
+**Subscription URL and import QR:** the helper creates a token-protected, read-only HTTPS server on **TCP 8443 by default**; it does not occupy 443, SSH or Snell's data port 17888. Open the selected HTTPS TCP port in the VPS provider's firewall. The URL follows this form:
+
+~~~text
+https://your-domain.example:8443/s/SECRET_TOKEN/config.json
+~~~
+
+The HTTPS endpoint returns a complete sing-box remote-profile JSON with the currently configured Snell PSK and TCP port. The QR facility outputs terminal QR (if qrencode is available), a raw subscription URL QR at /root/Snell-v6-subscription-qr.png, and a sing-box import-link QR at /root/Snell-v6-import-qr.png. Both PNGs are intended to remain root-only. Use sing-box Remote Profile URL import or compatible QR scanning, then test actual client connectivity.
+
+**Security and compatibility:** Subscription URLs/QRs contain a bearer token; holders can fetch your Snell PSK. Keep them private, and run **sn sub rotate** to invalidate an exposed token. The helper installs qrencode from apt when missing. An existing ygkkk cert.crt may be only a leaf certificate; iOS TLS may reject it unless the served chain includes the required intermediate certificates. Test HTTPS trust and real remote-profile import. The HTTPS server runs as the dedicated snellv6 service account using group-readable certificate copies, not the original ygkkk private key path.
+
+**Lifecycle:** sn sub disable removes only its HTTPS service, settings and generated QR while retaining the original certificates and the Snell server. sn uninstall first disables the managed HTTPS endpoint and then removes only standalone Snell files. The script does not deliberately alter existing ygkkk sing-box, Hysteria2, SSH, provider firewall, DNS or routing. Reinstalling Snell generates new credentials; reconfigure/refresh clients after reinstalling.
+
 ## Read-only plan first
 
 For a new Debian 12/13 or Ubuntu 24.04 VPS with systemd:
