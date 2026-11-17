@@ -18,6 +18,22 @@ jobs:
         run: |
           set -Eeuo pipefail
           bash -n snell-v6-oneclick.sh
+          bash -n sn
           bash snell-v6-oneclick.sh --help | grep -F 'Usage: sudo bash snell-v6-oneclick.sh'
+          bash snell-v6-oneclick.sh --help | grep -F -- '--install-sn'
+          bash sn --help | grep -F 'sn port'
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('snell-v6-oneclick.sh').read_text()
+          marker = "__SNELL_V6_MANAGER_SCRIPT_EOF__"
+          embedded = source.split('  cat > "$tmp" <<\'' + marker + '\'\n', 1)[1].split(marker + '\n', 1)[0]
+          assert embedded == Path('sn').read_text(), 'Embedded manager differs from source'
+          print('PASS: Embedded sn manager identical to standalone source')
+          PY
           test -s README.md
           echo 'PASS: script syntax and help; no VPS changes or network access'
+      - name: Mocked Snell port-manager lifecycle (ephemeral GitHub runner)
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo python3 tests/test-sn-port-manager.py

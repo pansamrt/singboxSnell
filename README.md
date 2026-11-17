@@ -23,6 +23,28 @@ bash -n snell-v6-oneclick.sh
 bash snell-v6-oneclick.sh --help
 ```
 
+## Manage Snell port with `sn` (new optional feature)
+
+On a VPS installed with this version, run as root:
+
+```bash
+sn
+```
+
+Menu choices: `1` to change the TCP listen port, `2` to show current status and port, or `0` to exit. Enter a new unprivileged TCP port **1024–65535** and type `YES` when prompted. The manager verifies the port is free, edits **only** the Snell `listen` setting, restarts **only** `snell-v6.service`, tests its local TCP listener, and automatically restores the previous config and restarts the old service if the new listener fails. It preserves the existing PSK, user, Snell binary and encryption settings. It updates only private root-owned `/root/*-ios.json` profiles matching the local Snell PSK and old port.
+
+**Previously installed VPS (Germany/Korea):** download the latest script from the copyable link above and install just the management command **without re-installing the proxy or regenerating client JSON**:
+
+```bash
+bash /root/snell-v6-oneclick.sh --install-sn
+sn status
+sn
+```
+
+The `--install-sn` command only installs/updates `/usr/local/bin/sn` and checks the expected independent Snell paths. It never asks for your IP, changes your port or PSK, restarts Snell, or downloads upstream packages. An unrelated existing `/usr/local/bin/sn` is not overwritten.
+
+**Network and client caveats:** The script never changes host/provider firewalls or security groups. Before switching, ensure the **new TCP port** is permitted by your VPS provider. A newly edited server port will **not** automatically update profiles already imported on your iPhone; re-import the updated `*-ios.json` via Xftp/SFTP or change the client `server_port` manually. Older QR/remote-subscription URLs, if used, require updating their hosted JSON separately. Local TCP reachability is not proof of Snell authentication or internet reachability.
+
 ## Read-only plan first
 
 For a new Debian 12/13 or Ubuntu 24.04 VPS with systemd:

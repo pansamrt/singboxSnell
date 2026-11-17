@@ -15,6 +15,7 @@ FAMILY=ipv4
 FAMILY_GIVEN=0
 PLAN=0
 REPLACE_CLIENT=0
+INSTALL_SN_ONLY=0
 APP_NAME=snell-v6
 UNIT=/etc/systemd/system/snell-v6.service
 BIN=/opt/snell-v6/snell-server
@@ -34,7 +35,7 @@ usage() {
   cat <<'EOF'
 Usage: sudo bash snell-v6-oneclick.sh [--server PUBLIC_IP] [--name NODE_NAME]
        [--port 17888] [--family ipv4|ipv6|dual]
-       [--plan] [--replace-client]
+       [--plan] [--replace-client] [--install-sn]
 
 Default: installs standalone official Snell v6.0.0 on TCP 17888 (IPv4 only),
 then writes /root/Snell-v6-ios.json for sing-box iOS 1.14+.
@@ -46,10 +47,280 @@ A partially present installation is refused rather than overwritten.
 
 --plan             Read-only inspection (no apt, download, or changes)
 --replace-client   Allow atomic replacement of an existing root-only client JSON
+--install-sn       Install/update only local sn management command on an existing VPS
 --family           New installations only; default ipv4, optional ipv6/dual
 --port             New installations only; default 17888
 EOF
 }
+# Embedded manager: no external download needed after initial installer.
+install_sn_command() {
+  local dest=/usr/local/bin/sn tmp
+  [[ -d /usr/local/bin && ! -L /usr/local/bin ]] || { info 'WARNING: /usr/local/bin unavailable; manager not installed.' >&2; return 0; }
+  if [[ -e "$dest" || -L "$dest" ]]; then
+    if [[ ! -f "$dest" || -L "$dest" || "$(stat -c %u -- "$dest")" != 0 ]] || ! grep -Fxq '# SNELL_V6_MANAGER=1' "$dest"; then
+      info "WARNING: existing $dest is not the Snell manager; refusing overwrite." >&2
+      return 0
+    fi
+  fi
+  tmp=$(mktemp /usr/local/bin/.sn.XXXXXXXX) || { info 'WARNING: Cannot stage sn manager.' >&2; return 0; }
+  cat > "$tmp" <<'__SNELL_V6_MANAGER_SCRIPT_EOF__'
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# SNELL_V6_MANAGER=1
+# Independent Snell v6 only. Never edits SSH, firewall, routes, sing-box or Hysteria2.
+set -Eeuo pipefail
+umask 077
+CONF=/etc/snell-v6/snell-server.conf
+UNIT=/etc/systemd/system/snell-v6.service
+BIN=/opt/snell-v6/snell-server
+
+info() { printf '[sn] %s\n' "$*"; }
+fail() { printf '[sn] ERROR: %s\n' "$*" >&2; exit 1; }
+usage() {
+  cat <<'EOF'
+Snell v6 standalone manager:
+  sn              Interactive menu
+  sn status       Show status and current TCP port
+  sn port         Change TCP port with interactive prompt and rollback
+  sn --help       Display this help
+EOF
+}
+precheck() {
+  [[ $EUID -eq 0 ]] || fail 'Run as root (sudo sn).'
+  for path in "$CONF" "$UNIT" "$BIN"; do
+    [[ -f "$path" && ! -L "$path" ]] || fail "Standalone Snell file missing or symlink: $path"
+    [[ "$(stat -c %u -- "$path")" == 0 ]] || fail "Standalone Snell file must be root-owned: $path"
+  done
+  [[ -d /etc/snell-v6 && ! -L /etc/snell-v6 ]] || fail 'Snell config directory is unsafe.'
+  grep -Fxq 'ExecStart=/opt/snell-v6/snell-server -c /etc/snell-v6/snell-server.conf' "$UNIT" ||
+    fail 'Unexpected snell-v6 systemd unit. No changes made.'
+  for prog in python3 systemctl flock; do
+    command -v "$prog" >/dev/null 2>&1 || fail "Required program missing: $prog"
+  done
+}
+current_port() {
+  python3 - "$CONF" <<'PY'
+import configparser, re, sys
+cfg = configparser.ConfigParser(interpolation=None)
+with open(sys.argv[1], encoding='utf-8') as f:
+    cfg.read_file(f)
+ports = set()
+for entry in cfg.get('snell-server', 'listen').split(','):
+    entry = entry.strip()
+    m = re.fullmatch(r'(0\.0\.0\.0|\[::\]|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-fA-F:]+\]):([0-9]{1,5})', entry)
+    if not m:
+        raise SystemExit('Unsupported listen address: ' + entry)
+    ports.add(int(m.group(2)))
+if len(ports) != 1:
+    raise SystemExit('Multiple distinct Snell listener ports; refusing automatic edit.')
+print(ports.pop())
+PY
+}
+show_status() {
+  precheck
+  local old
+  old=$(current_port)
+  info "Current Snell TCP port: $old"
+  info "snell-v6.service: $(systemctl is-active snell-v6.service 2>/dev/null || true)"
+}
+change_port() (
+  set -Eeuo pipefail
+  precheck
+  [[ -t 0 ]] || fail 'Changing port requires an interactive terminal.'
+  systemctl is-active --quiet snell-v6.service || fail 'Snell service not active. Diagnose before modifying.'
+  local old new confirm backup="" edited=0 committed=0
+  old=$(current_port)
+  printf '\nSnell v6 current TCP port: %s\n' "$old"
+  read -r -p 'New TCP port (1024-65535): ' new
+  [[ "$new" =~ ^[0-9]{1,5}$ ]] || fail 'Enter a decimal port in range 1024-65535.'
+  new=$((10#$new))
+  ((new >= 1024 && new <= 65535)) || fail 'Port must be 1024-65535.'
+  if ((new == old)); then info 'Port unchanged.'; exit 0; fi
+  printf 'Snell port: %s -> %s. PSK will stay unchanged.\n' "$old" "$new"
+  printf 'Provider firewall must allow new TCP %s; iPhone profile must be updated.\n' "$new"
+  read -r -p 'Type YES to confirm: ' confirm
+  [[ "$confirm" == YES ]] || { info 'Cancelled; no changes.'; exit 0; }
+
+  exec 9>/run/lock/snell-v6-port.lock
+  flock -n 9 || fail 'Another Snell port change is underway.'
+  [[ "$(current_port)" == "$old" ]] || fail 'Port changed concurrently; retry.'
+
+  # Test every actual configured IPv4/IPv6 TCP listen address, not just 0.0.0.0.
+  python3 - "$CONF" "$new" <<'PY'
+import configparser, ipaddress, socket, sys
+cfg = configparser.ConfigParser(interpolation=None)
+cfg.read(sys.argv[1])
+port = int(sys.argv[2])
+for entry in cfg.get('snell-server', 'listen').split(','):
+    host = entry.strip().rsplit(':', 1)[0].strip('[]')
+    address = ipaddress.ip_address(host)
+    family = socket.AF_INET if address.version == 4 else socket.AF_INET6
+    with socket.socket(family, socket.SOCK_STREAM) as sock:
+        if family == socket.AF_INET6:
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        try:
+            sock.bind((host, port))
+        except OSError as ex:
+            raise SystemExit(f'TCP {host}:{port} not available: {ex}')
+print('PASS: New TCP port free on configured bind addresses.')
+PY
+
+  rollback() {
+    local rc=$?
+    trap - EXIT HUP INT TERM
+    if ((edited && ! committed)); then
+      info "Port change failed. Restoring TCP $old and restarting ONLY snell-v6.service..." >&2
+      if cp -p -- "$backup" "$CONF" && systemctl restart snell-v6.service; then
+        info "Original Snell config and port $old restored." >&2
+      else
+        info "WARNING: Rollback failed. Inspect service; backup kept at $backup." >&2
+        exit "$rc"
+      fi
+    fi
+    [[ -z "$backup" ]] || rm -f -- "$backup"
+    exit "$rc"
+  }
+  trap rollback EXIT
+  backup=$(mktemp /etc/snell-v6/.port-backup.XXXXXXXX)
+  cp -p -- "$CONF" "$backup"
+
+  edited=1
+  python3 - "$CONF" "$new" <<'PY'
+import os, pathlib, re, stat, sys, tempfile
+path, port = pathlib.Path(sys.argv[1]), int(sys.argv[2])
+old = path.read_text(encoding='utf-8')
+rx = re.compile(r'^(\s*listen\s*=\s*)([^\r\n]+)$', re.MULTILINE)
+matches = rx.findall(old)
+if len(matches) != 1:
+    raise SystemExit('Expected exactly one listen setting.')
+def rewrite(match):
+    addresses = [item.strip() for item in match.group(2).split(',')]
+    return match.group(1) + ','.join(item.rsplit(':', 1)[0] + ':' + str(port) for item in addresses)
+new_config = rx.sub(rewrite, old, count=1)
+metadata = path.stat()
+fd, tmp = tempfile.mkstemp(prefix='.snell-listen-', dir=path.parent)
+try:
+    os.fchmod(fd, stat.S_IMODE(metadata.st_mode))
+    os.fchown(fd, metadata.st_uid, metadata.st_gid)
+    with os.fdopen(fd, 'w', encoding='utf-8') as out:
+        out.write(new_config)
+        out.flush()
+        os.fsync(out.fileno())
+    os.replace(tmp, path)
+finally:
+    if os.path.exists(tmp):
+        os.unlink(tmp)
+PY
+  systemctl restart snell-v6.service
+  systemctl is-active --quiet snell-v6.service || fail 'Snell did not restart; rollback triggered.'
+  python3 - "$CONF" "$new" <<'PY'
+import configparser, socket, sys, time
+cfg = configparser.ConfigParser(interpolation=None)
+cfg.read(sys.argv[1])
+item = cfg.get('snell-server', 'listen').split(',')[0].strip()
+host = item.rsplit(':', 1)[0].strip('[]')
+if host == '0.0.0.0':
+    host = '127.0.0.1'
+elif host == '::':
+    host = '::1'
+port = int(sys.argv[2])
+for _ in range(12):
+    try:
+        with socket.create_connection((host, port), timeout=1.0):
+            print('PASS: Snell v6 local TCP ready on', host, port)
+            break
+    except OSError:
+        time.sleep(.3)
+else:
+    raise SystemExit('New TCP listener not ready; rollback triggered.')
+PY
+  committed=1
+  rm -f -- "$backup"
+  backup=""
+  info "SUCCESS: Snell TCP port $old -> $new. PSK unchanged."
+
+  # Private, root-owned local sing-box profiles only; match local PSK & old port.
+  # Never update unrelated VPS nodes or any iPhone configuration remotely.
+  if ! python3 - "$CONF" "$old" "$new" <<'PY'
+import configparser, json, os, pathlib, stat, sys, tempfile
+cfg = configparser.ConfigParser(interpolation=None)
+cfg.read(sys.argv[1])
+psk = cfg.get('snell-server', 'psk')
+old, new = int(sys.argv[2]), int(sys.argv[3])
+updated = 0
+for path in pathlib.Path('/root').glob('*-ios.json'):
+    try:
+        st = path.lstat()
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or st.st_mode & 0o077:
+            print('SKIP unsafe client JSON:', path.name)
+            continue
+        doc = json.loads(path.read_text(encoding='utf-8'))
+        matches = [
+            item for item in doc.get('outbounds', [])
+            if isinstance(item, dict) and item.get('type') == 'snell'
+            and item.get('version') == 6 and item.get('psk') == psk
+            and item.get('server_port') == old
+        ]
+        if not matches:
+            continue
+        for item in matches:
+            item['server_port'] = new
+        fd, temp = tempfile.mkstemp(prefix='.snell-profile-', suffix='.json', dir=path.parent)
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                json.dump(doc, f, ensure_ascii=False, indent=2)
+                f.write('\n')
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(temp, 0o600)
+            os.replace(temp, path)
+        finally:
+            if os.path.exists(temp):
+                os.unlink(temp)
+        updated += 1
+        print('UPDATED client JSON:', path)
+    except (OSError, ValueError, TypeError, KeyError) as ex:
+        print('WARNING: Failed to update client:', path.name, type(ex).__name__)
+print('Private local iOS profiles updated:', updated)
+PY
+  then
+    info 'WARNING: Some iOS JSON files may need manual port updates.' >&2
+  fi
+
+  info "Ensure TCP $new is allowed by your VPS provider/security group."
+  info 'Re-import the updated JSON on iOS sing-box or change its server_port manually.'
+  info 'No SSH, firewall, other proxies, routing or PSK were modified.'
+)
+main() {
+  case "$*" in
+    --help|-h|help) usage ;;
+    status) show_status ;;
+    port) change_port ;;
+    "")
+      [[ -t 0 ]] || fail 'Interactive menu requires an SSH terminal.'
+      while true; do
+        printf '\n===== Snell v6 Manager =====\n'
+        printf '  1) Change TCP port\n  2) Show status\n  0) Exit\n'
+        read -r -p 'Choose [0-2]: ' choice || exit 0
+        case "$choice" in
+          1) change_port ;;
+          2) show_status ;;
+          0) exit 0 ;;
+          *) info 'Invalid selection.' ;;
+        esac
+      done
+      ;;
+    *) usage; fail 'Unknown command.' ;;
+  esac
+}
+main "$@"
+__SNELL_V6_MANAGER_SCRIPT_EOF__
+  if ! bash -n "$tmp"; then info 'WARNING: Invalid sn manager syntax.' >&2; rm -f -- "$tmp"; return 0; fi
+  chmod 755 "$tmp"
+  mv -fT -- "$tmp" "$dest"
+  info "Installed Snell management command $dest (enter sn for menu)."
+}
+
 cleanup() {
   local rc=$?
   trap - EXIT HUP INT TERM
@@ -86,6 +357,7 @@ while (($#)); do
       shift 2 ;;
     --plan) PLAN=1; shift ;;
     --replace-client) REPLACE_CLIENT=1; shift ;;
+    --install-sn) INSTALL_SN_ONLY=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *) usage; fail "Unknown argument: $1" ;;
   esac
@@ -113,6 +385,15 @@ esac
 PORT=$((10#$PORT))
 (( PORT >= 1024 && PORT <= 65535 )) || fail 'Choose an unprivileged TCP port 1024-65535.'
 case "$FAMILY" in ipv4|ipv6|dual) ;; *) fail 'Use --family ipv4|ipv6|dual.' ;; esac
+
+if (( INSTALL_SN_ONLY )); then
+  [[ -f "$BIN" && -f "$CONF" && -f "$UNIT" && ! -L "$BIN" && ! -L "$CONF" && ! -L "$UNIT" ]] ||
+    fail 'Complete independent Snell v6 installation required before installing sn manager.'
+  grep -Fxq 'ExecStart=/opt/snell-v6/snell-server -c /etc/snell-v6/snell-server.conf' "$UNIT" ||
+    fail 'Unexpected systemd unit; refusing manager install.'
+  install_sn_command
+  exit 0
+fi
 
 if [[ -z "$SERVER" ]]; then
   [[ -t 0 ]] || fail 'Noninteractive session requires --server PUBLIC_IP.'
@@ -392,6 +673,7 @@ print('Node name:', name, '| TCP port:', port, '| mode:', mode)
 print('PSK stays in private server/client files. DO NOT publish the JSON.')
 PY
 
+install_sn_command
 info "SUCCESS: ${APP_NAME}.service is active; independent Snell and sing-box installations coexist."
 info "Client profile: $OUT"
 info 'The profile can be downloaded via Xshell/Xftp SFTP, then imported via sing-box iOS > Profiles > Import from File.'
