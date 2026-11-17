@@ -15,6 +15,9 @@ FAMILY=ipv4
 FAMILY_GIVEN=0
 PLAN=0
 REPLACE_CLIENT=0
+QR_URL_FILE=''
+QR_TERMINAL=0
+REPLACE_QR=0
 APP_NAME=snell-v6
 UNIT=/etc/systemd/system/snell-v6.service
 BIN=/opt/snell-v6/snell-server
@@ -35,6 +38,7 @@ usage() {
 Usage: sudo bash snell-v6-oneclick.sh [--server PUBLIC_IP] [--name NODE_NAME]
        [--port 17888] [--family ipv4|ipv6|dual]
        [--plan] [--replace-client]
+       [--qr-url-file /root/private-subscription-url.txt] [--qr-terminal] [--replace-qr]
 
 Default: installs standalone official Snell v6.0.0 on TCP 17888 (IPv4 only),
 then writes /root/Snell-v6-ios.json for sing-box iOS 1.14+.
@@ -46,6 +50,14 @@ A partially present installation is refused rather than overwritten.
 
 --plan             Read-only inspection (no apt, download, or changes)
 --replace-client   Allow atomic replacement of an existing root-only client JSON
+--qr-url-file     OPTIONAL: root-owned private 0600 file containing one HTTPS JSON URL
+--qr-terminal     Show the import QR in terminal (exposes subscription URL visually)
+--replace-qr      Replace an existing private QR PNG explicitly
+
+QR uses the official sing-box REMOTE profile import scheme. A real privately
+hosted HTTPS URL serving this JSON is REQUIRED; no server or port is created.
+A QR that embeds raw JSON or a snell:// node link will not import into the
+official sing-box iOS app as a normal profile.
 --family           New installations only; default ipv4, optional ipv6/dual
 --port             New installations only; default 17888
 EOF
@@ -75,17 +87,20 @@ trap 'exit 129' HUP
 
 while (($#)); do
   case "$1" in
-    --server|--name|--port|--family)
+    --server|--name|--port|--family|--qr-url-file)
       (( $# >= 2 )) && [[ -n "$2" ]] || fail "Missing value after $1"
       case "$1" in
         --server) SERVER=$2 ;;
         --name) NAME=$2 ;;
         --port) PORT=$2; PORT_GIVEN=1 ;;
         --family) FAMILY=$2; FAMILY_GIVEN=1 ;;
+        --qr-url-file) QR_URL_FILE=$2 ;;
       esac
       shift 2 ;;
     --plan) PLAN=1; shift ;;
     --replace-client) REPLACE_CLIENT=1; shift ;;
+    --qr-terminal) QR_TERMINAL=1; shift ;;
+    --replace-qr) REPLACE_QR=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *) usage; fail "Unknown argument: $1" ;;
   esac
@@ -113,6 +128,16 @@ esac
 PORT=$((10#$PORT))
 (( PORT >= 1024 && PORT <= 65535 )) || fail 'Choose an unprivileged TCP port 1024-65535.'
 case "$FAMILY" in ipv4|ipv6|dual) ;; *) fail 'Use --family ipv4|ipv6|dual.' ;; esac
+if (( QR_TERMINAL || REPLACE_QR )) && [[ -z "$QR_URL_FILE" ]]; then
+  fail '--qr-terminal and --replace-qr require --qr-url-file.'
+fi
+if [[ -n "$QR_URL_FILE" ]]; then
+  [[ -f "$QR_URL_FILE" && ! -L "$QR_URL_FILE" ]] || fail 'QR URL file must be an existing regular, non-symlink file.'
+  [[ "$(stat -c '%u' -- "$QR_URL_FILE")" == '0' ]] || fail 'QR URL file must be root-owned.'
+  QR_FILE_MODE=$(stat -c '%a' -- "$QR_URL_FILE")
+  [[ "$QR_FILE_MODE" =~ ^[0-7]{3,4}$ ]] || fail 'QR URL file permissions invalid.'
+  (( (8#$QR_FILE_MODE & 0077) == 0 )) || fail 'QR URL file must not be group/world accessible (use chmod 600).'
+fi
 
 if [[ -z "$SERVER" ]]; then
   [[ -t 0 ]] || fail 'Noninteractive session requires --server PUBLIC_IP.'
@@ -153,6 +178,7 @@ fi
 
 URL="https://dl.nssurge.com/snell/snell-server-${VERSION}-linux-${ARCH}.zip"
 OUT="/root/${NAME}-ios.json"
+QR_OUT="/root/${NAME}-ios-qr.png"
 [[ ! -L "$OUT" ]] || fail "Refusing client-output symlink: $OUT"
 if [[ -e "$OUT" ]]; then
   [[ -f "$OUT" ]] || fail 'Client output exists but is not a regular file.'
@@ -170,6 +196,7 @@ if (( PLAN )); then
   info "Snell unit: ${APP_NAME}.service; new-install TCP port=$PORT, family=$FAMILY"
   info "Official archive: $URL"
   info "Client JSON: $OUT"
+  if [[ -n "$QR_URL_FILE" ]]; then info "Private QR PNG: $QR_OUT (requires a working private HTTPS URL)"; fi
   info 'Will not change SSH, host DNS, routes, firewall, kernel, or other proxy services.'
   if (( EXISTING )); then systemctl is-active "${APP_NAME}.service" || true; fi
   exit 0
@@ -184,6 +211,11 @@ if (( ! EXISTING )); then
 else
   info 'Detected existing independent Snell installation; skipping apt and binary/service changes.'
   command -v python3 >/dev/null 2>&1 || fail 'python3 required for iOS client generation.'
+fi
+if [[ -n "$QR_URL_FILE" ]] && ! command -v qrencode >/dev/null 2>&1; then
+  info 'Installing optional qrencode package for private sing-box iOS QR generation.'
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends qrencode
 fi
 
 # Confirm IP address and server-side listener compatibility without leaking keys.
@@ -392,8 +424,67 @@ print('Node name:', name, '| TCP port:', port, '| mode:', mode)
 print('PSK stays in private server/client files. DO NOT publish the JSON.')
 PY
 
+# Optional sing-box for iOS QR import. The code contains the URL of a PRIVATELY
+# HOSTED HTTPS sing-box JSON profile, not the JSON/PSK and not a snell:// link.
+# No hosting service is created; QR alone does NOT make the file downloadable.
+if [[ -n "$QR_URL_FILE" ]]; then
+  python3 - "$QR_URL_FILE" "$NAME" "$QR_OUT" "$REPLACE_QR" "$QR_TERMINAL" <<'PY'
+import os, pathlib, stat, subprocess, sys, tempfile
+from urllib.parse import quote, urlsplit
+
+source_name, name, target_name, replace, terminal = sys.argv[1:]
+source = pathlib.Path(source_name)
+st = source.lstat()
+if not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or st.st_mode & 0o077:
+    raise SystemExit('QR URL file must be root-owned, private and not a symlink.')
+url = source.read_text(encoding='utf-8').strip()
+if not url or len(url) > 1024 or any(c.isspace() or ord(c) < 32 for c in url):
+    raise SystemExit('QR URL must be one HTTPS URL of <= 1024 characters without whitespace.')
+parts = urlsplit(url)
+if (parts.scheme != 'https' or not parts.netloc or not parts.hostname
+        or parts.username or parts.password or parts.fragment):
+    raise SystemExit('QR URL must be a private HTTPS URL with no userinfo or fragment.')
+try:
+    _ = parts.port
+except ValueError as exc:
+    raise SystemExit('Invalid HTTPS URL port.') from exc
+link = 'sing-box://import-remote-profile?url=' + quote(url, safe='') + '#' + quote(name, safe='')
+target = pathlib.Path(target_name)
+if target.exists() or target.is_symlink():
+    existing = target.lstat()
+    if not stat.S_ISREG(existing.st_mode) or existing.st_uid != 0 or existing.st_mode & 0o077:
+        raise SystemExit('Refusing unsafe existing QR PNG.')
+fd, tmp = tempfile.mkstemp(prefix='.' + name + '-qr-', suffix='.png', dir=target.parent)
+os.close(fd)
+try:
+    subprocess.run(['qrencode', '-t', 'PNG', '-l', 'M', '-s', '8', '-m', '4',
+                    '-o', tmp], input=link, text=True, check=True)
+    if not os.path.getsize(tmp):
+        raise SystemExit('QR generation returned an empty image.')
+    os.chmod(tmp, 0o600)
+    if target.exists() and target.read_bytes() != pathlib.Path(tmp).read_bytes() and replace != '1':
+        raise SystemExit('QR image already exists and differs; use --replace-qr explicitly.')
+    if target.exists() and target.read_bytes() == pathlib.Path(tmp).read_bytes():
+        print('PASS: Existing private QR image exactly matches; no overwrite needed.')
+    else:
+        os.replace(tmp, target)
+    print('PASS: Private sing-box iOS remote-import QR saved:', target)
+    print('WARNING: This QR is a credential if its HTTPS URL is a bearer token.')
+    print('WARNING: The HTTPS URL must actually serve the PRIVATE iOS JSON for import to work.')
+    if terminal == '1':
+        if not sys.stdout.isatty():
+            raise SystemExit('--qr-terminal requires an interactive terminal.')
+        subprocess.run(['qrencode', '-t', 'ANSIUTF8', '-l', 'M'],
+                       input=link, text=True, check=True)
+finally:
+    if os.path.exists(tmp):
+        os.unlink(tmp)
+PY
+fi
+
 info "SUCCESS: ${APP_NAME}.service is active; independent Snell and sing-box installations coexist."
 info "Client profile: $OUT"
-info 'The profile can be downloaded via Xshell/Xftp SFTP, then imported via sing-box iOS > Profiles > Import from File.'
+info 'JSON can be copied via Xshell/Xftp SFTP and imported in sing-box iOS > Profiles > Import from File.'
+if [[ -n "$QR_URL_FILE" ]]; then info 'QR is for PRIVATE HTTPS remote-profile import only; scan it in sing-box iOS > Profiles > Scan QR Code.'; fi
 info 'Local TCP test is NOT a real external Snell handshake. Confirm provider firewall permits the TCP port.'
 info 'No firewall, SSH, routing, host DNS, kernel, or existing proxy services were edited.'
